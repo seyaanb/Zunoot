@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Zunoot | Flashcard App</title>
+    <link rel="icon" href="/static/icons/zunoot-192x192.png">
+    <meta name="theme-color" content="#000000">
+
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/icons/zunoot-192x192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/zunoot-512x512.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Zunoot">
+</head>
+<body class="default">
+    <header class="landing-header">
+        <h1 class="landing-title">Zunoot</h1>
+        <div class="login-buttons">
+            <button class="register-button">
+                <a href="{{ url_for('auth.register') }}">
+                    <p class="register">Register</p>
+                </a>
+            </button>
+            <button class="login-button">
+                <a href="{{ url_for('auth.login') }}">
+                    <p class="login">Login</p>
+                </a>
+            </button>
+        </div>  
+    </header>
+    {% with messages = get_flashed_messages() %}
+    {% if messages[-1] %}
+    <p class="flashed-message">{{ messages[-1] }}</p>
+    {% endif %}
+    {% endwith %}
+</body>
+</html>

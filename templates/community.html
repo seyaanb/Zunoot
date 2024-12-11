@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+    <h1 class="community-title">Community Library</h1>
+
+    <div class="browse-select">
+        <form action="{{ url_for('community.browse_subjects') }}">
+            <button class="browse-subjects" id="browseSubjects">Browse Subjects</button>
+        </form>
+        <form action="{{ url_for('community.browse_topics') }}">
+            <button class="browse-topics" id="browseTopics">Browse Topics</button>
+        </form>
+    </div>
+    
+
+    
+{% endblock %}

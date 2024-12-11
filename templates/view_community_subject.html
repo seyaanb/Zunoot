@@ -1,0 +1,30 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+<h2>{{ subject_name }}</h2>
+<form action="{{ url_for('community.import_subject', subject_id=subject_id, subject_name=subject_name ) }}">
+    <button class="import">Import</button>
+</form>
+
+<ul class="topics-list">
+    {% for topic in children %}
+        <li class="topic-name">
+            {{ topic }}
+        </li>
+        <ul class="flashcard-list">
+            {% if children[topic] %}
+                {% for flashcard in children[topic] %}
+                    <li class="flashcard-front">
+                        {{ flashcard[1] }}
+                    </li>
+                    <ul class="flashcard-back">
+                        <li class="flashcard-back"> {{ flashcard[2] }}</li>
+                    </ul>
+                {% endfor %}
+            {% endif %}
+        </ul>
+    {% endfor %}
+</ul>
+
+{% endblock %}

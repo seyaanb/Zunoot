@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+<div class="review">
+    <div class="flashcard">
+        <div id="front" class="flashcardText">
+            <p>{{ front }}</p>
+        </div>
+        <div id="back" class="flashcardText">
+            <p>{{ back }}</p>
+        </div>
+    </div>
+    <div id="showAnswerButton">
+        <button onclick="showAnswer()" {{ hidden }}>Show Answer</button>
+    </div>
+    <div class="optionButtons" id="optionButtons">
+        <form action="{{ url_for('library.spaced_repetition')}}" method="post">
+            <button type="submit" name="option" value="0" onclick="selectOption()">0</button>
+            <button type="submit" name="option" value="1" onclick="selectOption()">1</button>
+            <button type="submit" name="option" value="2" onclick="selectOption()">2</button>
+            <button type="submit" name="option" value="3" onclick="selectOption()">3</button>
+            <button type="submit" name="option" value="4" onclick="selectOption()">4</button>
+            <button type="submit" name="option" value="5" onclick="selectOption()">5</button>
+        </form>
+    </div>
+</div>
+<div class="endSession" id="endSession">
+    <form action="{{ url_for('library.end_session')}}" method="post">
+        <button type="submit" name="end-session" class="endSessionButton">End Session</button>
+    </form>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+    <form action="{{ url_for('library.library')}}">
+        <button class="back-button">&#8592; Back to Library</button>
+    </form>
+
+    <div class="search-results">
+        {% if subjects %}
+            <div class="subject-results">
+                <h2>Subjects</h2>
+                    <ul class="subject-results-list">
+                        {% for subject in subjects %}
+                            <li>
+                                <a href="{{ url_for('library.subject', subject_name=subject.getName()) }}" class="link" id="link">{{ subject.getName() }}</a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+            </div>
+        {% endif %}
+        {% if topics %}
+            <div class="topic-results">
+                <h2>Topics</h2>
+                    <ul class="topic-results-list">
+                        {% for topic in topics %}
+                            <li>
+                                <a href="{{ url_for('library.topic', subject_name=topic.getParent().getName(), topic_name=topic.getName()) }}" class="link" id="link">{{ topic.getName() }}</a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+            </div>
+        {% endif %}
+        {% if flashcards %}
+            <div class="flashcard-results">
+                <h2>Flashcards</h2>
+                    <ul class="flashcard-results-list">
+                        {% for flashcard in flashcards %}
+                            <li class="flashcard-front">
+                                {{ flashcard.getName() }}
+                            </li>
+                            <ul class="flashcard-back">
+                                {{ flashcard.getBack() }}
+                            </ul>
+                        {% endfor %}
+                    </ul>
+            </div>
+        {% endif %}
+        {% if not (flashcards or topics or subjects) %}
+            <h4>No results found</h4>
+        {% endif %}
+    </div>
+{% endblock %}

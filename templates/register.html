@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Zunoot | Flashcard App</title>
+    <link rel="icon" href="/static/icons/zunoot-192x192.png">
+    <meta name="theme-color" content="#000000">
+
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/icons/zunoot-192x192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/zunoot-512x512.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Zunoot">
+
+</head>
+<body class="default">
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages[-1] %}
+    <p class="flashed-message">{{ messages[-1] }}</p>
+    {% endif %}
+    {% endwith %}
+
+    <form action="/" class="back-to-landing">
+        <input type="submit" value="Back">
+    </form>
+
+    <div class="register-box">
+        <form action="{{ url_for('auth.register') }}" method="post" class="register-form">
+            <input type="text" id="username" name="username" placeholder="Username" autofocus autocomplete="off">
+            <input type="text" id="first-name" name="first-name" placeholder="First Name" autocomplete="off">
+            <input type="text" id="last-name" name="last-name" placeholder="Last Name" autocomplete="off">
+            <input type="text" id="email" name="email" placeholder="Email Address" autocomplete="off">
+            <input type="password" id="password" name="password" placeholder="Password" autocomplete="off">
+            <input type="submit" value="Submit">
+        </form>
+    </div>
+</body>
+</html>

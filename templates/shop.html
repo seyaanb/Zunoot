@@ -1,0 +1,54 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+<h1 class="shop-heading">Shop</h1>
+
+<div class="shop-container">
+    <div class="selection-tab">
+        <button class="tablinks {% if item_type == 'avatar' %}active{% endif %}"
+                onclick="redirectToShop('avatar')">Avatars</button>
+        <button class="tablinks {% if item_type == 'theme' %}active{% endif %}"
+                onclick="redirectToShop('theme')">Themes</button>
+    </div>
+
+    <div class="item-grid">
+        {% for item in purchased_items %}
+            <div class="purchased-item">
+                {% if item_type == "avatar" %}
+                    <img src="{{ url_for('static', filename='avatars/' +  item[2]  + '.jpg') }}" alt="{{ item[2] }}">
+                {% else %}
+                    <img src="{{ url_for('static', filename='themes/' +  item[2]  + '.png') }}" alt="{{ item[2] }}">
+                {% endif %}
+                <p>{{ item[2].capitalize() }}</p>
+                <p>Owned</p>
+                <form action="{{ url_for('shop.equip', item_type=item_type, item_id=item[0]) }}" method="post">
+                    {% if item_type == "avatar" and item[2] == avatar %}
+                        <button type="submit">Equipped</button>
+                    {% elif item_type == "theme" and item[2] == theme %}
+                        <button type="submit">Equipped</button>
+                    {% else %}
+                        <button type="submit">Equip</button>
+                    {% endif %}
+                </form>
+            </div>
+        {% endfor %}
+
+        {% for item in shop_items %}
+            <div class="shop-item">
+                {% if item_type == "avatar" %}
+                    <img src="{{ url_for('static', filename='avatars/' +  item[2]  + '.jpg') }}" alt="{{ item[2] }}">
+                {% else %}
+                    <img src="{{ url_for('static', filename='themes/' +  item[2]  + '.png') }}" alt="{{ item[2] }}">
+                {% endif %}
+                <p>{{ item[2].capitalize() }}</p>
+                <p>Price: {{ item[3] }} coins</p>
+                <form action="{{ url_for('shop.purchase', item_id=item[0]) }}" method="post">
+                    <button type="submit">Buy</button>
+                </form>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% endblock %}

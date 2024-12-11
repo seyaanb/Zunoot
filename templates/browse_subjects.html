@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+
+<form action="{{ url_for('community.browse_subjects') }}" method="get" class="searchBar">
+    <input type="text" name="keyword" placeholder="Search">
+</form>
+    
+<h2 class="community-heading">Subjects</h2>    
+
+<div class="subjects-box">
+    <ul class="subject-list">
+        {% for subject in subjects %}
+        <li class="subject-box">
+            <a href="{{ url_for('community.view_subject', subject_id=subject[0], subject_name=subject[1]) }}" class="subject-link">
+                <h4 class="subject-name">
+                    {{ subject[1] }}
+                </h4>
+                <ul class="creator">
+                    <li class="creator-name"><u>{{ subject[2] }}</u></li>
+                </ul>
+                {% if user == subject[2] %}
+                    <form action="{{ url_for('community.delete_community_subject') }}" class="delete-community-form">
+                        <input type="hidden" name="subject_id" value="{{ subject[0] }}">
+                        <button class="delete-community-subject">Delete</button>
+                    </form>
+                {% endif %}
+            </a>
+        </li>   
+        {% endfor %}
+    </ul>
+</div>
+
+{% endblock %}

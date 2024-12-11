@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json')}}">
+    <meta name="theme-color" content="#000000">
+    <link rel="icon" href="/static/icons/zunoot-192x192.png">
+
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/icons/zunoot-192x192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/zunoot-512x512.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Zunoot">
+
+    <title>Zunoot | Flashcard App</title>
+</head>
+<body class="{{ theme }}">
+    <header>
+        <nav class="navigation">
+            <div class="menu-button" id="menuButton">&#9776;</div>
+            <ul class="links" id="links">
+                <li>
+                    <a href="{{ url_for('library.library')}}">My Library</a>
+                </li>
+                <li>
+                    <a href="{{ url_for('community.community')}}">Community Library</a>
+                </li>
+                <li>
+                    <a href="{{ url_for('guild.guild')}}">Guilds</a>
+                </li>
+                <li>
+                    <a href="{{ url_for('shop.shop')}}">Shop</a>
+                </li>
+            </ul>
+        </nav>
+        <h1 class="title">Zunoot</h1>
+        <div class="coin_box">
+            <img src="{{ url_for('static', filename='coin.png') }}" alt="Coins">
+            <p class="coins">{{ coins }}</p>
+        </div>
+
+        <div class="profile-dropdown">
+            <img src="{{ url_for('static', filename='avatars/' +  avatar  + '.jpg') }}" alt="{{ avatar }}" class="profile-icon" id="profileDropdownButton">
+
+            <div class="dropdown-content" id="dropdownContent">
+                <a href="{{ url_for('auth.logout') }}">Logout</a>
+                <a href="{{ url_for('auth.delete_account') }}" onclick="return confirm('Are you sure you want to delete your account? Everything linked to it will be deleted too.');">Delete Account</a>
+            </div>
+        </div>
+    </header>
+    
+    {% with messages = get_flashed_messages() %}
+    {% if messages[-1] %}
+    <p class="flashed-message">{{ messages[-1] }}</p>
+    {% endif %}
+    {% endwith %}
+
+    {% block main %}{% endblock %}
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</body>
+</html>
+

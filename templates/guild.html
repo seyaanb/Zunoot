@@ -1,0 +1,90 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+{% if guild %}
+    <div class="guild-header">
+        <h1 class="guild-name">{{ guild }}</h1>
+        {% if role == "leader" %}
+        <form action="{{ url_for('guild.delete_guild')}}">
+            <button type="submit">Delete Guild</button>
+        </form>
+        {% else %}
+        <form action="{{ url_for('guild.leave_guild')}}">
+            <button type="submit">Leave Guild</button>
+        </form>
+        {% endif %}
+    </div>
+    {% if role == "leader" %}
+        <div class="requests">
+            <h3 class="requests-heading" id="requestsHeading">Requests &#11206;</h3>
+            <ul class="requests-list">
+                {% for request in guild_requests %}
+                <li class="request">
+                    <p>{{ request[1] }}</p>
+                    <form action="{{ url_for('guild.accept_request')}}" method="post">
+                        <input type="hidden" name="username" value="{{ request[1] }}">
+                        <input type="hidden" name="guild_name" value="{{ guild }}">
+                        <input type="submit" value="Accept">
+                    </form>
+                    <form action="{{ url_for('guild.reject_request')}}" method="post">
+                        <input type="hidden" name="username" value="{{ request[1] }}">
+                        <input type="hidden" name="guild_name" value="{{ guild }}">
+                        <input type="submit" value="Reject">
+                    </form>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <div class="leaderboard-container">
+        <h2>Intra-Guild Leaderboard</h2>
+        <ol class="leaderboard">
+            {% for member in intra_leaderboard %}
+                <li>
+                    <img src="{{ url_for('static', filename='avatars/' + member[0] + '.jpg') }}" alt="{{ member[0] }}" class="profile-icon">
+                    <p>{{ member[1] }}</p>
+                    <p>{{ member[2] }} points</p>
+                </li>
+            {% endfor %}
+        </ol>
+        <h2>Inter-Guild Leaderboard</h2>
+        <ol class="leaderboard">
+            {% for guild in inter_leaderboard %}
+                <li>
+                    <p>{{ guild[0] }}</p>
+                    <p>{{ guild[1] }} points</p>
+                </li>
+            {% endfor %}
+        </ol>       
+    </div>
+    
+{% else %}
+
+
+    <button id="createGuildButton" class="create-guild-button" type="button">Create Guild</button>
+    <form action="{{ url_for('guild.create_guild')}}" id="createGuildForm" class="create-guild-form">
+        <input type="text" name="guild_name" placeholder="Guild Name">
+        <input type="submit" value="Submit">
+    </form>
+    
+    <ul class="guild-list">
+        <h3>Guilds available to join:</h3>
+        {% for guild in guilds %}
+            <li>
+                <p><strong>{{ guild[0] }}</strong></p>
+                <ul>
+                    <p>Leader: {{ guild[1] }}</p>
+                    <p>{{ guild[2] }} points</p>
+                    <p>{{ guild[3] }}/50 members</p>
+                    <form action="{{ url_for('guild.join_guild', guild_name=guild[0]) }}">
+                        <input type="submit" value="Request">
+                    </form>
+                </ul>
+            </li>  
+        {% endfor %}
+    </ul>
+{% endif %}
+
+{% endblock %}

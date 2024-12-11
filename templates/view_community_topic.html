@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+
+{% block main %}
+
+
+<h2>{{ topic_name }}</h2>
+<div class="dropdown">
+        <button class="import" onclick="toggleDropdown()">Import</button>
+        <div class="dropdown-subjects" id="dropdownSubjects">
+            {% for subject in user_subjects %}
+                <a href="{{ url_for('community.import_topic', topic_id=topic_id, topic_name=topic_name, subject_id=subject[0] ) }}">{{ subject[1] }}</a>
+            {% endfor %}
+        </div>
+</div>
+
+
+<ul class="flashcard-list">
+    {% for flashcard in flashcards %}
+        <li class="flashcard-front">
+            {{ flashcard[1] }}
+        </li>
+        <ul class="flashcard-back">
+            <li class="flashcard-back"> {{ flashcard[2] }}</li>
+        </ul>
+    {% endfor %}
+</ul>
+
+{% endblock %}
