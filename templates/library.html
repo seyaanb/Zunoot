@@ -1,9 +1,6 @@
 {% extends "layout.html" %}
 
-
 {% block main %}
-
-
 
 <div class="searchBar">
     <form action="{{ url_for('library.search_library')}}" method="get">
@@ -16,6 +13,7 @@
 <div class="review-section">
     <button class="review-button" id="reviewButton">Review</button>
     <form action="{{ url_for('library.review_page')}}" class="review-options" id="reviewOptions" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button class="spaced-repetition" name="spaced-repetition" value="true">With Spaced Repetition</button>
         <button class="spaced-repetition" name="spaced-repetition" value="false">Without Spaced Repetition</button>
     </form>
@@ -28,17 +26,20 @@
                 <li class="subject" data-id= "{{ subject.subject_id }}" data-type="Subject">
                     <a href="{{ url_for('library.subject', subject_name=subject.getName()) }}" class="link" id="link">{{ subject.getName() }}</a>
                     <form action="{{ url_for('library.edit_subject')}}" method="post" class="edit-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="text" id="newSubjectName" name="new-subject-name" value="{{ subject.getName() }}" autofocus>
                         <input type="hidden" id="oldSubjectName" name="old-subject-name" value="{{ subject.getName() }}">
                     </form>
                     <div class="options-menu">
                         <button class="edit-button">Edit</button>
                         <form action="{{ url_for('library.delete')}}" class="delete-form" id="deleteForm" method="post" onsubmit="return confirm('Are you sure you want to delete this? Everything inside will be deleted too.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <input type="hidden" name="type" value="subject">
                             <input type="hidden" name="id" value="{{ subject.subject_id }}">
                             <button type="submit" class="delete-button">Delete</button>
                         </form>
                         <form action="{{ url_for('community.upload_subject')}}" method="post">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <input type="hidden" name="name" value="{{ subject.getName() }}">
                             <button type="submit" class="upload-button">Upload to community</button>
                         </form>
@@ -53,17 +54,20 @@
                 <li class="topic" data-id="{{ topic.topic_id }}" data-type="Topic">
                     <a href="{{ url_for('library.topic', subject_name=current_subject.getName(), topic_name=topic.getName()) }}" class="link" id="link">{{ topic.getName() }}</a>
                     <form action="{{ url_for('library.edit_topic')}}" method="post" class="edit-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="text" id="newTopicName" name="new-topic-name" value="{{ topic.getName() }}" autofocus>
                         <input type="hidden" id="oldTopicName" name="old-topic-name" value="{{ topic.getName() }}">
                     </form>
                     <div class="options-menu">
                         <button class="edit-button">Edit</button>
                         <form action="{{ url_for('library.delete') }}" class="delete-form" id="deleteForm" method="post" onsubmit="return confirm('Are you sure you want to delete this? Everything inside will be deleted too.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <input type="hidden" name="type" value="topic">
                             <input type="hidden" name="id" value="{{ topic.topic_id }}">
                             <button type="submit" class="delete-button">Delete</button>
                         </form>
                         <form action="{{ url_for('community.upload_topic') }}" method="post">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <input type="hidden" name="name" value="{{ topic.getName() }}">
                             <button type="submit" class="upload-button">Upload to community</button>
                         </form>
@@ -81,6 +85,7 @@
                         <div class="flashcard-answer" id="flashcardAnswer">{{ flashcard.getBack()}}</div>
                     </div>
                     <form action="{{ url_for('library.edit_flashcard')}}" method="post" class="edit-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="text" id="newFlashcardFront" name="new-flashcard-front" value="{{ flashcard.getName() }}" autofocus>
                         <input type="text" id="newFlashcardBack" name="new-flashcard-back" value="{{ flashcard.getBack() }}">
                         <input type="hidden" id="oldFlashcardFront" name="old-flashcard-front" value="{{ flashcard.getName() }}">
@@ -89,6 +94,7 @@
                         <button class="reveal-flashcard" id="revealFlashcard">Show Answer</button>
                         <button class="edit-button">Edit</button>
                         <form action="{{ url_for('library.delete')}}" id="deleteForm" method="post" onsubmit="return confirm('Are you sure you want to delete this?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <input type="hidden" name="type" value="flashcard">
                             <input type="hidden" name="id" value="{{ flashcard.flashcard_id }}">
                             <button type="submit" class="delete-button">Delete</button>
@@ -104,6 +110,7 @@
         + new subject
     </button>
     <form id="addForm" class="add-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="text" id="newSubject" name="new-subject" placeholder="Subject Name" autofocus>
     </form>
     {% endif %}
@@ -112,6 +119,7 @@
         + new topic
     </button>
     <form id="addForm" class="add-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="text" id="newTopic" name="new-topic" placeholder="Topic Name" autofocus>
     </form>
     {% endif %}
@@ -120,6 +128,7 @@
         + new flashcard
     </button>
         <form id="addForm" class="add-form" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <input type="text" id="newFlashcardFront" name="new-flashcard-front" placeholder="Front" autofocus>
             <input type="text" id="newFlashcardBack" name="new-flashcard-back" placeholder="Back">
         </form>

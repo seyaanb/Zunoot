@@ -29,6 +29,7 @@
 
     <div class="register-box">
         <form action="{{ url_for('auth.register') }}" method="post" class="register-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <input type="text" id="username" name="username" placeholder="Username" autofocus autocomplete="off">
             <input type="text" id="first-name" name="first-name" placeholder="First Name" autocomplete="off">
             <input type="text" id="last-name" name="last-name" placeholder="Last Name" autocomplete="off">

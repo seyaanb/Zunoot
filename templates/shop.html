@@ -23,6 +23,7 @@
                 <p>{{ item[2].capitalize() }}</p>
                 <p>Owned</p>
                 <form action="{{ url_for('shop.equip', item_type=item_type, item_id=item[0]) }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     {% if item_type == "avatar" and item[2] == avatar %}
                         <button type="submit">Equipped</button>
                     {% elif item_type == "theme" and item[2] == theme %}
@@ -44,6 +45,7 @@
                 <p>{{ item[2].capitalize() }}</p>
                 <p>Price: {{ item[3] }} coins</p>
                 <form action="{{ url_for('shop.purchase', item_id=item[0]) }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <button type="submit">Buy</button>
                 </form>
             </div>

@@ -16,6 +16,7 @@
     </div>
     <div class="optionButtons" id="optionButtons">
         <form action="{{ url_for('library.spaced_repetition')}}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <button type="submit" name="option" value="0" onclick="selectOption()">0</button>
             <button type="submit" name="option" value="1" onclick="selectOption()">1</button>
             <button type="submit" name="option" value="2" onclick="selectOption()">2</button>
@@ -27,6 +28,7 @@
 </div>
 <div class="endSession" id="endSession">
     <form action="{{ url_for('library.end_session')}}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" name="end-session" class="endSessionButton">End Session</button>
     </form>
 </div>

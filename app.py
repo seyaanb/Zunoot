@@ -2,6 +2,7 @@
 from flask import Flask, send_from_directory, redirect, url_for
 from flask_session import Session
 from flask_login import LoginManager
+from flask_wtf.csrf import CSRFProtect
 from blueprints.auth import auth_bp
 from blueprints.library import library_bp
 from blueprints.community import community_bp
@@ -11,10 +12,12 @@ from config import Config
 import backend.queries as q
 import backend.user as u
 
-
 #initialise Flask app
 app = Flask(__name__, instance_relative_config=True)
 app.config.from_object(Config)
+
+#initialise CSRF Protection
+csrf = CSRFProtect(app)
 
 #initialise and configure flask login
 login_manager = LoginManager()
@@ -50,5 +53,4 @@ def service_worker():
     return send_from_directory(".", "service-worker.js", mimetype="application/javascript")
 
 if __name__ == "__main__":
-    app.secret_key = "dev"
     app.run(host="0.0.0.0", port=5000)

@@ -23,11 +23,13 @@
                 <li class="request">
                     <p>{{ request[1] }}</p>
                     <form action="{{ url_for('guild.accept_request')}}" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="hidden" name="username" value="{{ request[1] }}">
                         <input type="hidden" name="guild_name" value="{{ guild }}">
                         <input type="submit" value="Accept">
                     </form>
                     <form action="{{ url_for('guild.reject_request')}}" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="hidden" name="username" value="{{ request[1] }}">
                         <input type="hidden" name="guild_name" value="{{ guild }}">
                         <input type="submit" value="Reject">
