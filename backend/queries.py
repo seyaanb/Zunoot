@@ -818,13 +818,3 @@ def equip_theme(username, theme_name):
                    where username = ?''', (theme_name, username))
     conn.commit()
     conn.close()
-
-def give_coins():
-    conn = database()
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''
-                   update students set coins = 10000000 where username = "sbudhkar"
-                   ''')
-    conn.commit()
-    conn.close()
