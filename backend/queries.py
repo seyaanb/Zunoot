@@ -1,10 +1,11 @@
-import sqlite3
+import os
+import psycopg2
 import backend.session_queue as sq
 from backend.flashcard_library import flashcard as f
 from datetime import datetime, timezone, timedelta
 
 def database():
-    return sqlite3.connect("test.db")
+    return psycopg2.connect(os.environ.get("DATABASE_URL"))
 
 ids = {
     "Library": "username",
@@ -23,7 +24,6 @@ child_tables = {
 def retrieve_deck():
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute("select * from flashcards")
     deck = cursor.fetchall()
     conn.close()
@@ -33,13 +33,12 @@ def retrieve_deck():
 def push_deck(deck):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     for flashcard in deck:
         sql = '''
         UPDATE flashcards
-        SET front = ?, back = ?, review_interval = ?, repetition_no = ?, easiness_factor = ?,
-            last_review = ?, next_review = ?
-        WHERE front = ?
+        SET front = %s, back = %s, review_interval = %s, repetition_no = %s, easiness_factor = %s,
+            last_review = %s, next_review = %s
+        WHERE front = %s
         '''
         
         front = flashcard.getName()
@@ -59,38 +58,38 @@ def push_deck(deck):
 def delete_subject(subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    delete from subjects
-                   where subject_id = ?''', (int(subject_id),))
+                   where subject_id = %s''', (int(subject_id),))
     conn.commit()
     conn.close()
 
 def delete_topic(topic_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    delete from topics
-                   where topic_id = ?''', (int(topic_id),))
+                   where topic_id = %s''', (int(topic_id),))
     conn.commit()
     conn.close()
 
 def delete_flashcard(flashcard_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    delete from flashcards
-                   where flashcard_id = ?''', (int(flashcard_id),))
+                   where flashcard_id = %s''', (int(flashcard_id),))
     conn.commit()
     conn.close()
 
 def get_new_subject_position(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''select MAX(position) from subjects where username = ?''', (username,))
+    
+    cursor.execute('''select MAX(position) from subjects where username = %s''', (username,))
     max_position = cursor.fetchone()[0]
     conn.close()
     if max_position is not None:
@@ -101,8 +100,8 @@ def get_new_subject_position(username):
 def get_new_topic_position(subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''select max(position) from topics where subject_id = ?''', (subject_id,))
+    
+    cursor.execute('''select max(position) from topics where subject_id = %s''', (subject_id,))
     max_position = cursor.fetchone()[0]
     conn.close()
     if max_position is not None:
@@ -113,8 +112,8 @@ def get_new_topic_position(subject_id):
 def get_new_flashcard_position(topic_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''select max(position) from flashcards where topic_id = ?''', (topic_id,))
+    
+    cursor.execute('''select max(position) from flashcards where topic_id = %s''', (topic_id,))
     max_position = cursor.fetchone()[0]
     conn.close()
     if max_position is not None:
@@ -126,14 +125,14 @@ def get_new_flashcard_position(topic_id):
 def add_subject(subject_name, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     position = get_new_subject_position(username)
     cursor.execute('''
                    insert into subjects(subject_name, username, position)
-                   values (?, ?, ?)''', (subject_name, username, position))
+                   values (%s, %s, %s) RETURNING subject_id''', (subject_name, username, position))
+                   
+    subject_id = cursor.fetchone()[0]
     conn.commit()
-
-    subject_id = cursor.lastrowid
     conn.close()
 
     return subject_id
@@ -141,14 +140,14 @@ def add_subject(subject_name, username):
 def add_topic(topic_name, subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     position = get_new_topic_position(subject_id)
     cursor.execute('''
                    insert into topics(topic_name, subject_id, position)
-                   values (?, ?, ?)''', (topic_name, subject_id, position))
+                   values (%s, %s, %s) RETURNING topic_id''', (topic_name, subject_id, position))
+                   
+    topic_id = cursor.fetchone()[0]
     conn.commit()
-
-    topic_id = cursor.lastrowid
     conn.close()
 
     return topic_id
@@ -156,23 +155,23 @@ def add_topic(topic_name, subject_id):
 def add_flashcard(front, back, topic_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     position = get_new_flashcard_position(topic_id)
     cursor.execute('''
                    insert into flashcards(front, back, topic_id, position)
-                   values (?, ?, ?, ?)''', (front, back, topic_id, position))
+                   values (%s, %s, %s, %s)''', (front, back, topic_id, position))
     conn.commit()
     conn.close()
 
 def get_children(current_class, id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
 
     table = child_tables[current_class]
     id_name = ids[current_class]
 
-    query = f"select * from {table} where {id_name} = ? order by position"
+    query = f"select * from {table} where {id_name} = %s order by position"
     cursor.execute(query, (id,))
     children = cursor.fetchall()
     conn.close()
@@ -181,11 +180,11 @@ def get_children(current_class, id):
 def edit_subject_name(subject_id, new_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
 
     query = '''update subjects
-               set subject_name = ?
-               where subject_id = ?'''
+               set subject_name = %s
+               where subject_id = %s'''
     cursor.execute(query, (new_name, subject_id))
     conn.commit()
     conn.close()
@@ -193,11 +192,11 @@ def edit_subject_name(subject_id, new_name):
 def edit_topic_name(topic_id, new_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
 
     query = '''update topics
-               set topic_name = ?
-               where topic_id = ?'''
+               set topic_name = %s
+               where topic_id = %s'''
     cursor.execute(query, (new_name, topic_id))
     conn.commit()
     conn.close()
@@ -205,11 +204,11 @@ def edit_topic_name(topic_id, new_name):
 def edit_flashcard(flashcard_id, front, back):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
 
     query = '''update flashcards
-               set front = ?, back = ?
-               where flashcard_id = ?'''
+               set front = %s, back = %s
+               where flashcard_id = %s'''
     cursor.execute(query, (front, back, flashcard_id))
     conn.commit()
     conn.close()
@@ -217,8 +216,8 @@ def edit_flashcard(flashcard_id, front, back):
 def check_subject_exists(subject, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("select * from subjects where subject_name = ? and username = ?", (subject, username))
+    
+    cursor.execute("select * from subjects where subject_name = %s and username = %s", (subject, username))
     subject = cursor.fetchone()
     if subject:
         return True
@@ -227,8 +226,8 @@ def check_subject_exists(subject, username):
 def check_topic_exists(topic, subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("select * from topics where topic_name = ? and subject_id = ?", (topic, subject_id))
+    
+    cursor.execute("select * from topics where topic_name = %s and subject_id = %s", (topic, subject_id))
     topic = cursor.fetchone()
     if topic:
         return True
@@ -237,8 +236,8 @@ def check_topic_exists(topic, subject_id):
 def get_subject_id(subject, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("select subject_id from subjects where subject_name = ? and username = ?", (subject, username))
+    
+    cursor.execute("select subject_id from subjects where subject_name = %s and username = %s", (subject, username))
     subject_id = int(cursor.fetchone()[0])
     
     return subject_id
@@ -246,8 +245,8 @@ def get_subject_id(subject, username):
 def get_topic_id(topic, subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("select topic_id from topics where topic_name = ? and subject_id = ?", (topic, subject_id))
+    
+    cursor.execute("select topic_id from topics where topic_name = %s and subject_id = %s", (topic, subject_id))
     topic_id = int(cursor.fetchone()[0])
     
     return topic_id
@@ -258,10 +257,10 @@ def update_order(item_type, order):
 
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     
     for item in order:
-        sql = f'''update {item_type.lower()}s set position = ? where {ids[item_type]} = ?'''
+        sql = f'''update {item_type.lower()}s set position = %s where {ids[item_type]} = %s'''
         cursor.execute(sql, (item["position"], item["id"]))
     
     conn.commit()
@@ -272,38 +271,58 @@ def update_order(item_type, order):
 def add_community_subject(subject_object, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("insert into communitysubjects (community_subject_name, uploader_username) values (?, ?) ", (subject_object.getName(), username))
+    
+    cursor.execute('''
+                   insert into communitysubjects (community_subject_name, uploader_username) 
+                   values (%s, %s) RETURNING community_subject_id
+                   ''', (subject_object.getName(), username))
+                   
+    subject_id = cursor.fetchone()[0]
     conn.commit()
-    subject_id = cursor.lastrowid
+    
     for topic in subject_object.children:
-        cursor.execute("PRAGMA foreign_keys = ON;")
-        cursor.execute("insert into communitytopics (community_topic_name, community_subject_id, uploader_username) values (?, ?, ?)", (topic.getName(), subject_id, username))
+        cursor.execute('''
+                       insert into communitytopics (community_topic_name, community_subject_id, uploader_username) 
+                       values (%s, %s, %s) RETURNING community_topic_id
+                       ''', (topic.getName(), subject_id, username))
+                       
+        topic_id = cursor.fetchone()[0]
         conn.commit()
-        topic_id = cursor.lastrowid
+        
         for flashcard in topic.children:
-            cursor.execute("PRAGMA foreign_keys = ON;")
-            cursor.execute("insert into communityflashcards (community_topic_id, front, back) values (?, ?, ?)", (topic_id, flashcard.getName(), flashcard.getBack()))
+            cursor.execute('''
+                           insert into communityflashcards (community_topic_id, front, back) 
+                           values (%s, %s, %s)
+                           ''', (topic_id, flashcard.getName(), flashcard.getBack()))
             conn.commit()
+            
     conn.close()
 
 def add_community_topic(topic_object, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("insert into communitytopics (community_topic_name, uploader_username) values (?, ?)", (topic_object.getName(), username))
+    
+    cursor.execute('''
+                   insert into communitytopics (community_topic_name, uploader_username) 
+                   values (%s, %s) RETURNING community_topic_id
+                   ''', (topic_object.getName(), username))
+                   
+    topic_id = cursor.fetchone()[0]
     conn.commit()
-    topic_id = cursor.lastrowid
+    
     for flashcard in topic_object.children:
-        cursor.execute("PRAGMA foreign_keys = ON;")
-        cursor.execute("insert into communityflashcards (community_topic_id, front, back) values (?, ?, ?)", (topic_id, flashcard.getName(), flashcard.getBack()))
+        cursor.execute('''
+                       insert into communityflashcards (community_topic_id, front, back) 
+                       values (%s, %s, %s)
+                       ''', (topic_id, flashcard.getName(), flashcard.getBack()))
         conn.commit()
+        
     conn.close()
 
 def get_community_subjects():
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute("select * from communitysubjects order by community_subject_name asc")
     subjects = cursor.fetchall()
     conn.close()
@@ -313,8 +332,8 @@ def get_community_subjects():
 def get_community_subjects_from_keyword(keyword):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    query = "select * from communitysubjects where community_subject_name like ? order by community_subject_name asc"
+    
+    query = "select * from communitysubjects where community_subject_name like %s order by community_subject_name asc"
     cursor.execute(query, (f"%{keyword}%",))
     subjects = cursor.fetchall()
     conn.close()
@@ -325,10 +344,10 @@ def get_community_subjects_from_keyword(keyword):
 def get_community_topics_from_subject(subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''select community_topic_id, community_topic_name
                       from communitytopics
-                      where community_subject_id = ?
+                      where community_subject_id = %s
                       order by community_topic_name asc''', (subject_id,))
     topics = cursor.fetchall()
 
@@ -337,7 +356,7 @@ def get_community_topics_from_subject(subject_id):
 def get_community_topics():
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute("select * from communitytopics order by community_topic_name asc")
     topics = cursor.fetchall()
     conn.close()
@@ -347,8 +366,8 @@ def get_community_topics():
 def get_community_topics_from_keyword(keyword):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    query = "select * from communitytopics where community_topic_name like ? order by community_topic_name asc"
+    
+    query = "select * from communitytopics where community_topic_name like %s order by community_topic_name asc"
     cursor.execute(query, (f"%{keyword}%",))
     topics = cursor.fetchall()
     conn.close()
@@ -358,10 +377,10 @@ def get_community_topics_from_keyword(keyword):
 def get_community_flashcards(topic_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''select community_flashcard_id, front, back
                       from communityflashcards
-                      where community_topic_id = ?
+                      where community_topic_id = %s
                       order by front asc''', (topic_id,))
     
     flashcards = cursor.fetchall()
@@ -393,37 +412,37 @@ def import_community_topic(subject_id, community_topic_id, topic_name):
 def delete_community_subject(subject_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute(''' delete from communitysubjects
-                       where community_subject_id = ?''', (subject_id,))
+                       where community_subject_id = %s''', (subject_id,))
     conn.commit()
     conn.close()
 
 def delete_community_topic(topic_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute(''' delete from communitytopics
-                       where community_topic_id = ?''', (topic_id,))
+                       where community_topic_id = %s''', (topic_id,))
     conn.commit()
     conn.close()
 
 def check_community_subject_exists(username, subject_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''select community_subject_id from communitysubjects
-                   where uploader_username = ? and community_subject_name = ?''', (username, subject_name))
+                   where uploader_username = %s and community_subject_name = %s''', (username, subject_name))
     subject = cursor.fetchall()
     return subject
 
 def check_community_topic_exists(username, topic_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select community_topic_id from communitytopics
-                   where uploader_username = ? and community_topic_name = ?''', (username, topic_name))
+                   where uploader_username = %s and community_topic_name = %s''', (username, topic_name))
     topic = cursor.fetchall()
     return topic
 
@@ -433,8 +452,8 @@ def check_community_topic_exists(username, topic_name):
 def check_user_exists(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("select * from students where username = ?", (username,))
+    
+    cursor.execute("select * from students where username = %s", (username,))
     user = cursor.fetchall()
     conn.close()
     if user:
@@ -444,31 +463,35 @@ def check_user_exists(username):
 def insert_new_user(username, first_name, last_name, password_hash, email_address):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''
-                   insert into students(username, first_name, last_name, password, email_address, date_joined)
-                   values(?, ?, ?, ?, ?, ?)
-                   ''', (username, first_name, last_name, password_hash, email_address, datetime.now().date()))
-    conn.commit()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''
-                   insert into purchases (username, item_id)
-                   values (?, 1)''', (username,))
-    conn.commit()
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute('''
-                   insert into purchases (username, item_id)
-                   values (?, 13)''', (username,))
-    conn.commit()
-    conn.close()
+    
+    try:
+        cursor.execute('''
+                       insert into students(username, first_name, last_name, password, email_address, date_joined)
+                       values(%s, %s, %s, %s, %s, %s)
+                       ''', (username, first_name, last_name, password_hash, email_address, datetime.now().date()))
+        
+        cursor.execute('''
+                       insert into purchases (username, item_id)
+                       values (%s, 1)''', (username,))
+        
+        cursor.execute('''
+                       insert into purchases (username, item_id)
+                       values (%s, 13)''', (username,))
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 def get_user(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select * from students
-                   where username = ?
+                   where username = %s
                    ''', (username,))
     user = cursor.fetchone()
     conn.close()
@@ -477,10 +500,10 @@ def get_user(username):
 def get_user_guild(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select guild_name from students
-                   where username = ?
+                   where username = %s
                    ''', (username,))
     user = cursor.fetchone()
     conn.close()
@@ -489,22 +512,22 @@ def get_user_guild(username):
 def add_coins_db(username, quantity):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    update students
-                   set coins = coins + ?
-                   where username = ?''', (quantity, username))
+                   set coins = coins + %s
+                   where username = %s''', (quantity, username))
     conn.commit()
     conn.close()
 
 def add_points_db(username, quantity):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    update students
-                   set points = points + ?
-                   where username = ?''', (quantity, username))
+                   set points = points + %s
+                   where username = %s''', (quantity, username))
     conn.commit()
     conn.close()
 
@@ -513,20 +536,20 @@ def add_points_db(username, quantity):
     if user_guild:
         conn = database()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA foreign_keys = ON;")
+        
         cursor.execute('''
                        update guilds
-                       set points = points + ?
-                       where guild_name = ?''', (quantity, user_guild[0]))
+                       set points = points + %s
+                       where guild_name = %s''', (quantity, user_guild[0]))
         conn.commit()
         conn.close()
 
 def delete_user(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''delete from students
-                      where username = ?''', (username,))
+                      where username = %s''', (username,))
     conn.commit()
     conn.close()
 
@@ -535,17 +558,17 @@ def delete_user(username):
 def create_guild(guild_name, leader_username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    insert into guilds(guild_name, leader_username)
-                   values (?, ?)''', (guild_name, leader_username))
+                   values (%s, %s)''', (guild_name, leader_username))
     conn.commit()
     conn.close()
 
 def get_all_guilds():
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select * from guilds
                    where no_of_members < 50''')
@@ -558,16 +581,16 @@ def get_all_guilds():
 def join_guild(username, guild_name, user_role):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''update students
-                      set guild_name = ?, guild_role = ?
-                      where username = ?''', (guild_name, user_role, username))
+                      set guild_name = %s, guild_role = %s
+                      where username = %s''', (guild_name, user_role, username))
     conn.commit()
     conn.close()
 
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''update guilds
                       set no_of_members = no_of_members + 1''')
     conn.commit()
@@ -577,20 +600,18 @@ def join_guild(username, guild_name, user_role):
 def request_guild(username, guild_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute('''insert into guildrequests(request_username, status, guild_name)
-                      values(?, "pending", ?)''', (username, guild_name))
+                      values(%s, 'pending', %s)''', (username, guild_name))
     conn.commit()
     conn.close()
 
 def get_user_requests(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute('''
                    select * from guildrequests
-                   where request_username = ?
-                   and status = "pending"''', (username, ))
+                   where request_username = %s
+                   and status = 'pending' ''', (username, ))
     requests = cursor.fetchall()
     conn.close()
     return requests
@@ -598,19 +619,18 @@ def get_user_requests(username):
 def delete_user_requests(username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''delete from guildrequests
-                      where request_username = ?''', (username,))
+                      where request_username = %s''', (username,))
     conn.commit()
     conn.close()
 
 def get_guild_requests(guild_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute('''select * from guildrequests
-                   where guild_name = ?
-                   and status = "pending"''', (guild_name, ))
+                   where guild_name = %s
+                   and status = 'pending' ''', (guild_name, ))
     requests = cursor.fetchall()
     conn.close()
     return requests
@@ -618,24 +638,22 @@ def get_guild_requests(guild_name):
 def accept_guild_request(username, guild_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute('''
                    update guildrequests
-                   set status = "accepted"
-                   where request_username = ?
-                   and guild_name = ?''', (username, guild_name))
+                   set status = 'accepted'
+                   where request_username = %s
+                   and guild_name = %s''', (username, guild_name))
     conn.commit()
     conn.close()
 
 def reject_guild_request(username, guild_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
     cursor.execute('''
                    update guildrequests
-                   set status = "declined"
-                   where request_username = ?
-                   and guild_name = ?''', (username, guild_name))
+                   set status = 'declined'
+                   where request_username = %s
+                   and guild_name = %s''', (username, guild_name))
     conn.commit()
     conn.close()
 
@@ -643,18 +661,18 @@ def delete_guild(current_user):
     guild_name = current_user.get_guild()
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
 
     cursor.execute('''
                    update students
                    set guild_role = null, points = 0, guild_name = null
-                   where guild_name = ?''', (guild_name,))
+                   where guild_name = %s''', (guild_name,))
     conn.commit()
 
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    delete from guilds
-                   where guild_name = ?''', (guild_name,))
+                   where guild_name = %s''', (guild_name,))
     conn.commit()
     conn.close()
 
@@ -663,31 +681,31 @@ def leave_guild(current_user):
     guild_name = current_user.get_guild()
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
 
     cursor.execute('''select points from students
-                   where username = ?''', (username,))
+                   where username = %s''', (username,))
     points = cursor.fetchone()
 
     cursor.execute('''update guilds
-                   set points = points - ?, no_of_members = no_of_members - 1
-                   where guild_name = ?''', (points[0], guild_name))
+                   set points = points - %s, no_of_members = no_of_members - 1
+                   where guild_name = %s''', (points[0], guild_name))
     conn.commit()
 
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    update students
                    set guild_name = null, guild_role = null, points = 0
-                   where username = ?''', (username,))
+                   where username = %s''', (username,))
     conn.commit()
     conn.close()
 
 def get_intra_leaderboard(guild_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''select avatar, username, points from students
-                    where guild_name = ?
+                    where guild_name = %s
                    order by points desc''', (guild_name,))
     leaderboard = cursor.fetchall()
     print(leaderboard)
@@ -697,7 +715,7 @@ def get_intra_leaderboard(guild_name):
 def get_inter_leaderboard():
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''select guild_name, points from guilds
                    order by points desc''')
     leaderboard = cursor.fetchall()
@@ -707,7 +725,7 @@ def get_inter_leaderboard():
 def points_reset():
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''select last_reset from pointsreset''')
     last_reset = cursor.fetchone()[0]
 
@@ -719,17 +737,17 @@ def points_reset():
     if last_reset < str(monday_midnight):
         conn = database()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA foreign_keys = ON;")
+        
         cursor.execute('update students set points = 0')
         cursor.execute('update guilds set points = 0')               
-        cursor.execute('update pointsreset set last_reset = ?', (now,))
+        cursor.execute('update pointsreset set last_reset = %s', (now,))
         conn.commit()
     conn.close()
 
 def guild_exists(guild_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute('select guild_name from guilds where guild_name = ?', (guild_name,))
+    cursor.execute('select guild_name from guilds where guild_name = %s', (guild_name,))
     guild = cursor.fetchone()
     if guild:
         return True
@@ -740,35 +758,35 @@ def guild_exists(guild_name):
 def get_purchased_items(item_type, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select * from shopitems
                    join purchases on purchases.item_id = shopitems.item_id
-                   where shopitems.item_type = ? 
-                   and purchases.username = ?''', (item_type, username))
+                   where shopitems.item_type = %s 
+                   and purchases.username = %s''', (item_type, username))
     purchased_items = cursor.fetchall()
     return purchased_items
 
 def get_shop_items(item_type, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select shopitems.* from shopitems
                    left join purchases on shopitems.item_id = purchases.item_id
-                   and purchases.username = ?
+                   and purchases.username = %s
                    where purchases.item_id is null
-                   and shopitems.item_type = ?''', (username, item_type))
+                   and shopitems.item_type = %s''', (username, item_type))
     shop_items = cursor.fetchall()
     return shop_items
 
 def get_item_price(item_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select price from shopitems
-                   where item_id = ?''', (item_id, ))
+                   where item_id = %s''', (item_id, ))
     price = cursor.fetchone()
 
     return price
@@ -776,21 +794,21 @@ def get_item_price(item_id):
 def add_purchase(item_id, username):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    insert into purchases(username, item_id)
-                   values (?, ?)''', (username, item_id))
+                   values (%s, %s)''', (username, item_id))
     conn.commit()
     conn.close()
 
 def get_item_details(item_id):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    select item_id, item_name, item_type
                    from shopitems
-                   where item_id = ?''', (item_id, ))
+                   where item_id = %s''', (item_id, ))
     item_details = cursor.fetchone()
     cursor.close()
     conn.close()
@@ -800,21 +818,21 @@ def get_item_details(item_id):
 def equip_avatar(username, avatar_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    update students
-                   set avatar = ?
-                   where username = ?''', (avatar_name, username))
+                   set avatar = %s
+                   where username = %s''', (avatar_name, username))
     conn.commit()
     conn.close()
 
 def equip_theme(username, theme_name):
     conn = database()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    
     cursor.execute('''
                    update students
-                   set theme = ?
-                   where username = ?''', (theme_name, username))
+                   set theme = %s
+                   where username = %s''', (theme_name, username))
     conn.commit()
     conn.close()
