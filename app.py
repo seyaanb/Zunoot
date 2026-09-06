@@ -3,6 +3,7 @@ from flask import Flask, send_from_directory, redirect, url_for
 from flask_session import Session
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
+from flask_sqlalchemy import SQLAlchemy
 from blueprints.auth import auth_bp
 from blueprints.library import library_bp
 from blueprints.community import community_bp
@@ -11,10 +12,15 @@ from blueprints.shop import shop_bp
 from config import Config
 import backend.queries as q
 import backend.user as u
+import os
 
 #initialise Flask app
 app = Flask(__name__, instance_relative_config=True)
 app.config.from_object(Config)
+
+#SQLAlchemy instance used only for session storage, not for app queries
+db = SQLAlchemy(app)
+app.config["SESSION_SQLALCHEMY"] = db
 
 #initialise CSRF Protection
 csrf = CSRFProtect(app)
@@ -34,6 +40,8 @@ def load_user(username):
 
 #initialise session
 Session(app)
+with app.app_context():
+    db.create_all()
 
 #default route
 @app.route("/")
@@ -53,4 +61,5 @@ def service_worker():
     return send_from_directory(".", "service-worker.js", mimetype="application/javascript")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
