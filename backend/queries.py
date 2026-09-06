@@ -183,10 +183,10 @@ def edit_subject_name(subject_id, new_name):
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
 
-    query = f'''update subjects
-                set subject_name = ?
-                where subject_id = {subject_id}'''
-    cursor.execute(query, (new_name,))
+    query = '''update subjects
+               set subject_name = ?
+               where subject_id = ?'''
+    cursor.execute(query, (new_name, subject_id))
     conn.commit()
     conn.close()
 
@@ -195,10 +195,10 @@ def edit_topic_name(topic_id, new_name):
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
 
-    query = f'''update topics
-                set topic_name = ?
-                where topic_id = {topic_id}'''
-    cursor.execute(query, (new_name,))
+    query = '''update topics
+               set topic_name = ?
+               where topic_id = ?'''
+    cursor.execute(query, (new_name, topic_id))
     conn.commit()
     conn.close()
 
@@ -207,10 +207,10 @@ def edit_flashcard(flashcard_id, front, back):
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
 
-    query = f'''update flashcards
-                set front = ?, back = ?
-                where flashcard_id = {flashcard_id}'''
-    cursor.execute(query, (front, back))
+    query = '''update flashcards
+               set front = ?, back = ?
+               where flashcard_id = ?'''
+    cursor.execute(query, (front, back, flashcard_id))
     conn.commit()
     conn.close()
 
@@ -253,6 +253,9 @@ def get_topic_id(topic, subject_id):
     return topic_id
 
 def update_order(item_type, order):
+    if item_type not in ids:
+        raise ValueError(f"Invalid item_type: {item_type}")
+
     conn = database()
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
@@ -260,6 +263,7 @@ def update_order(item_type, order):
     for item in order:
         sql = f'''update {item_type.lower()}s set position = ? where {ids[item_type]} = ?'''
         cursor.execute(sql, (item["position"], item["id"]))
+    
     conn.commit()
     conn.close()
 
@@ -310,8 +314,8 @@ def get_community_subjects_from_keyword(keyword):
     conn = database()
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
-    query = f"select * from communitysubjects where community_subject_name like '%{keyword}%' order by community_subject_name asc"
-    cursor.execute(query)
+    query = "select * from communitysubjects where community_subject_name like ? order by community_subject_name asc"
+    cursor.execute(query, (f"%{keyword}%",))
     subjects = cursor.fetchall()
     conn.close()
 
@@ -344,8 +348,8 @@ def get_community_topics_from_keyword(keyword):
     conn = database()
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
-    query = f"select * from communitytopics where community_topic_name like '%{keyword}%' order by community_topic_name asc"
-    cursor.execute(query)
+    query = "select * from communitytopics where community_topic_name like ? order by community_topic_name asc"
+    cursor.execute(query, (f"%{keyword}%",))
     topics = cursor.fetchall()
     conn.close()
 
