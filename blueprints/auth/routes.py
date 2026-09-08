@@ -1,4 +1,4 @@
-from flask import render_template, redirect, url_for, flash, request
+from flask import render_template, redirect, url_for, flash, request, current_app
 from flask_login import login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import backend.queries as q
@@ -79,7 +79,8 @@ def register():
             flash("Success! You can now log in")
 
             return redirect(url_for("auth.login"))
-        except:
+        except Exception:
+            current_app.logger.exception("Registration failed")
             flash("Whoops, something didn't work. Please try again")
             return redirect(url_for("auth.register"))
 
@@ -106,8 +107,9 @@ def login():
                 
             flash("Wrong username/password. Please try again")
             return redirect(url_for("auth.login"))
-        
-        except:
+
+        except Exception:
+            current_app.logger.exception("Login failed")
             flash("Whoops, something didn't work. Please try again")
             return redirect(url_for("auth.login"))
 

@@ -5,7 +5,10 @@ from backend.flashcard_library import flashcard as f
 from datetime import datetime, timezone, timedelta
 
 def database():
-    return psycopg2.connect(os.environ.get("DATABASE_URL"))
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        url = url.strip().strip('"').strip("'")
+    return psycopg2.connect(url)
 
 ids = {
     "Library": "username",
@@ -216,9 +219,10 @@ def edit_flashcard(flashcard_id, front, back):
 def check_subject_exists(subject, username):
     conn = database()
     cursor = conn.cursor()
-    
+
     cursor.execute("select * from subjects where subject_name = %s and username = %s", (subject, username))
     subject = cursor.fetchone()
+    conn.close()
     if subject:
         return True
     return False
@@ -226,9 +230,10 @@ def check_subject_exists(subject, username):
 def check_topic_exists(topic, subject_id):
     conn = database()
     cursor = conn.cursor()
-    
+
     cursor.execute("select * from topics where topic_name = %s and subject_id = %s", (topic, subject_id))
     topic = cursor.fetchone()
+    conn.close()
     if topic:
         return True
     return False
@@ -236,19 +241,21 @@ def check_topic_exists(topic, subject_id):
 def get_subject_id(subject, username):
     conn = database()
     cursor = conn.cursor()
-    
+
     cursor.execute("select subject_id from subjects where subject_name = %s and username = %s", (subject, username))
     subject_id = int(cursor.fetchone()[0])
-    
+    conn.close()
+
     return subject_id
 
 def get_topic_id(topic, subject_id):
     conn = database()
     cursor = conn.cursor()
-    
+
     cursor.execute("select topic_id from topics where topic_name = %s and subject_id = %s", (topic, subject_id))
     topic_id = int(cursor.fetchone()[0])
-    
+    conn.close()
+
     return topic_id
 
 def update_order(item_type, order):
@@ -350,6 +357,7 @@ def get_community_topics_from_subject(subject_id):
                       where community_subject_id = %s
                       order by community_topic_name asc''', (subject_id,))
     topics = cursor.fetchall()
+    conn.close()
 
     return topics
 
@@ -434,16 +442,18 @@ def check_community_subject_exists(username, subject_name):
     cursor.execute('''select community_subject_id from communitysubjects
                    where uploader_username = %s and community_subject_name = %s''', (username, subject_name))
     subject = cursor.fetchall()
+    conn.close()
     return subject
 
 def check_community_topic_exists(username, topic_name):
     conn = database()
     cursor = conn.cursor()
-    
+
     cursor.execute('''
                    select community_topic_id from communitytopics
                    where uploader_username = %s and community_topic_name = %s''', (username, topic_name))
     topic = cursor.fetchall()
+    conn.close()
     return topic
 
 
@@ -749,6 +759,7 @@ def guild_exists(guild_name):
     cursor = conn.cursor()
     cursor.execute('select guild_name from guilds where guild_name = %s', (guild_name,))
     guild = cursor.fetchone()
+    conn.close()
     if guild:
         return True
     return False
@@ -762,9 +773,10 @@ def get_purchased_items(item_type, username):
     cursor.execute('''
                    select * from shopitems
                    join purchases on purchases.item_id = shopitems.item_id
-                   where shopitems.item_type = %s 
+                   where shopitems.item_type = %s
                    and purchases.username = %s''', (item_type, username))
     purchased_items = cursor.fetchall()
+    conn.close()
     return purchased_items
 
 def get_shop_items(item_type, username):
@@ -778,6 +790,7 @@ def get_shop_items(item_type, username):
                    where purchases.item_id is null
                    and shopitems.item_type = %s''', (username, item_type))
     shop_items = cursor.fetchall()
+    conn.close()
     return shop_items
 
 def get_item_price(item_id):
@@ -788,6 +801,7 @@ def get_item_price(item_id):
                    select price from shopitems
                    where item_id = %s''', (item_id, ))
     price = cursor.fetchone()
+    conn.close()
 
     return price
 
