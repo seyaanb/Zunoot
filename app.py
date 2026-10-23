@@ -15,6 +15,8 @@ import backend.queries as q
 import backend.user as u
 import os
 import observability
+from contextlib import contextmanager
+from sqlalchemy import text
 
 #initialise Flask app
 app = Flask(__name__, instance_relative_config=True)
@@ -40,10 +42,28 @@ def load_user(username):
         return u.User(*user)
     return None
 
-#initialise session
-Session(app)
-with app.app_context():
-    db.create_all()
+#arbitrary constant identifying the schema-setup lock below
+SCHEMA_SETUP_LOCK_KEY = 4207155391
+
+@contextmanager
+def schema_setup_lock():
+    '''
+    serialises table creation across processes. gunicorn workers (without --preload) import this
+    module at the same moment; on a database without the sessions table yet, two workers would both
+    see it missing and both run CREATE TABLE, and the loser crashes the worker with a UniqueViolation
+    (found by CI on a fresh database). a transaction-scoped Postgres advisory lock makes the others
+    wait; they then see the table and skip it. it's released when the transaction ends, even if the
+    process dies, and works through Neon's pooled (PgBouncer, transaction-mode) endpoint.
+    '''
+    with app.app_context(), db.engine.connect() as conn, conn.begin():
+        conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SCHEMA_SETUP_LOCK_KEY})
+        yield
+
+#initialise session (Flask-Session creates its table here) and any missing tables
+with schema_setup_lock():
+    Session(app)
+    with app.app_context():
+        db.create_all()
 
 #metrics, structured JSON logs and request IDs (see OPS_NOTES.md)
 observability.init_app(app, db)

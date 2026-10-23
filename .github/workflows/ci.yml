@@ -58,7 +58,7 @@ jobs:
       - name: hadolint (Dockerfile)
         run: docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" hadolint/hadolint:v2.15.1 < Dockerfile
       - name: shellcheck (backup scripts)
-        run: shellcheck scripts/backup/*.sh
+        run: shellcheck scripts/backup/*.sh scripts/ci/*.sh
       - name: actionlint (GitHub workflows)
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
@@ -163,6 +163,70 @@ jobs:
             echo "::error::restore.sh overwrote a non-empty database"; exit 1
           fi
 
+  # Reproduces Render's *native* Python runtime, which production actually runs
+  # (not the Docker image): Python 3.14.3, a plain `pip install -r
+  # requirements.txt` build, an empty /tmp, and `gunicorn app:app` with the
+  # environment Render sets by default for Python services, including
+  # GUNICORN_CMD_ARGS="--preload ...". That --preload is what crashed the
+  # first deploy of PR #1; the Docker job couldn't see it. Also restarts once
+  # with stale metric files left behind, as a redeploy on the same disk would.
+  render-native:
+    name: render-native (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: render-defaults
+            gunicorn_cmd_args: "--preload --access-logfile - --bind=0.0.0.0:10000"
+          - mode: no-preload
+            gunicorn_cmd_args: ""
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zunoot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # What Render provides at runtime (docs: render.com/docs/environment-variables)
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/zunoot
+      SECRET_KEY: ci-only-secret
+      PORT: "10000"
+      FORWARDED_ALLOW_IPS: "*"
+      GUNICORN_CMD_ARGS: ${{ matrix.gunicorn_cmd_args }}
+      METRICS_TOKEN: ci-metrics-token
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.3"   # Render's current default; keep in sync with the service
+      - name: Build like Render (requirements.txt only, no dev tools)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt
+      - name: Load schema into the throwaway database
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/schema.sql -f db/seed_dev.sql
+      - name: Boot on a fresh machine with `gunicorn app:app`
+        run: |
+          rm -rf /tmp/zunoot-prometheus
+          test ! -e /tmp/zunoot-prometheus
+          scripts/ci/boot_and_probe.sh first-boot
+      - name: Restart with stale metric files left behind
+        run: |
+          kill -TERM "$(cat gunicorn.pid)"
+          for _ in $(seq 1 30); do kill -0 "$(cat gunicorn.pid)" 2>/dev/null || break; sleep 1; done
+          ls /tmp/zunoot-prometheus/*.db >/dev/null   # the previous run's files are still there
+          scripts/ci/boot_and_probe.sh restart
+      - name: gunicorn output
+        if: always()
+        run: cat gunicorn-*.log || true
+
   # Build the exact image Render will build, start it against a throwaway
   # Postgres, and check it boots, answers health checks and runs as non-root.
   docker:
@@ -214,10 +278,22 @@ jobs:
         run: |
           k6 run -q -e BASE_URL=http://localhost:10000 -e PROFILE=smoke \
             -e LOADTEST_USERS=1 -e SUBJECTS=1 -e TOPICS=2 -e CARDS=3 -e RUN_ID=ci \
-            -e SUMMARY_FILE=k6-smoke.json loadtest/zunoot.js
+            -e SUMMARY_FILE=k6-smoke.json loadtest/zunoot.js 2>&1 | tee k6.out
+          exit "${PIPESTATUS[0]}"
       - name: Container logs
         if: always()
         run: docker logs app || true
+      # Attach the evidence to the job as annotations (readable in the PR's
+      # checks view and through the API), so a failure can be diagnosed
+      # without the raw log.
+      - name: Annotate failure details
+        if: failure()
+        run: |
+          enc() { sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}'; }
+          echo "::error title=container log (last 40 lines)::$(docker logs app 2>&1 | tail -n 40 | enc)"
+          if [ -f k6.out ]; then
+            echo "::error title=k6 output (last 40 lines)::$(tail -n 40 k6.out | enc)"
+          fi
       - name: Report image size
         run: |
           docker image inspect zunoot:ci --format '{{.Size}}' | awk '{printf "image size: %.0f MB\n", $1/1000/1000}'
