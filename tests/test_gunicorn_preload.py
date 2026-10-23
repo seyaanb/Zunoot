@@ -80,6 +80,19 @@ def _backend_pid(app_module):
             return conn.exec_driver_sql("select pg_backend_pid()").scalar()
 
 
+def _pooled_backend_pids(app_module):
+    """Backend PIDs of every connection idle in the parent's pool (app.py's
+    import-time setup can leave more than one)."""
+    with app_module.app.app_context():
+        engine = app_module.db.engine
+        conns = [engine.connect() for _ in range(max(engine.pool.checkedin(), 1))]
+        try:
+            return {c.exec_driver_sql("select pg_backend_pid()").scalar() for c in conns}
+        finally:
+            for c in conns:
+                c.close()
+
+
 def _backend_pid_in_child(app_module, run_post_fork):
     """Fork like gunicorn does; return the Postgres backend PID the child uses."""
     conf = _load_gunicorn_conf()
@@ -103,11 +116,57 @@ def _backend_pid_in_child(app_module, run_post_fork):
 def test_forked_workers_get_their_own_database_connection(app):
     import app as app_module
 
-    parent = _backend_pid(app_module)  # leaves a pooled connection, like app.py's create_all()
+    _backend_pid(app_module)  # make sure the pool holds at least one idle connection
+    parent = _pooled_backend_pids(app_module)
 
-    # Without the hook the child reuses the parent's socket: proves the danger is real.
-    assert _backend_pid_in_child(app_module, run_post_fork=False) == parent
+    # Without the hook the child reuses one of the parent's sockets: the danger is real.
+    assert _backend_pid_in_child(app_module, run_post_fork=False) in parent
     # With gunicorn.conf.py's post_fork, the child opens its own connection...
-    assert _backend_pid_in_child(app_module, run_post_fork=True) != parent
-    # ...and the parent's connection is still intact.
-    assert _backend_pid(app_module) == parent
+    assert _backend_pid_in_child(app_module, run_post_fork=True) not in parent
+    # ...and the parent's connections are untouched.
+    assert _pooled_backend_pids(app_module) == parent
+
+
+# Without --preload, every gunicorn worker imports app.py at the same moment.
+# Each process below is patched so SQLAlchemy's "does the table exist?" check
+# sleeps for a second after answering: that widens the race window CI hit, and
+# without the schema-setup lock in app.py, all processes then try CREATE TABLE.
+_SLOW_CHECK_THEN_IMPORT = """
+import time
+import sqlalchemy.dialects.postgresql.base as pg
+_orig = pg.PGDialect.has_table
+def _slow(self, *a, **k):
+    r = _orig(self, *a, **k)
+    time.sleep(1.0)
+    return r
+pg.PGDialect.has_table = _slow
+import app
+"""
+
+
+def test_workers_starting_together_on_a_fresh_database():
+    from urllib.parse import urlparse, urlunparse
+
+    import psycopg2
+
+    from conftest import TEST_DATABASE_URL
+
+    admin = psycopg2.connect(TEST_DATABASE_URL)
+    admin.autocommit = True
+    scratch = "zunoot_startup_race_test"
+    with admin.cursor() as cur:
+        cur.execute(f"DROP DATABASE IF EXISTS {scratch}")
+        cur.execute(f"CREATE DATABASE {scratch}")
+    url = urlunparse(urlparse(TEST_DATABASE_URL)._replace(path=f"/{scratch}"))
+    try:
+        env = dict(os.environ, DATABASE_URL=url, SECRET_KEY="test")
+        env.pop("PROMETHEUS_MULTIPROC_DIR", None)
+        procs = [subprocess.Popen([sys.executable, "-c", _SLOW_CHECK_THEN_IMPORT], cwd=REPO, env=env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                 for _ in range(3)]
+        errors = [p.communicate(timeout=60)[1] for p in procs if p.wait(timeout=60) != 0]
+        assert not errors, errors[0][-800:]
+    finally:
+        with admin.cursor() as cur:
+            cur.execute(f"DROP DATABASE IF EXISTS {scratch} WITH (FORCE)")
+        admin.close()

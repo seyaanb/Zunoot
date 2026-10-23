@@ -49,6 +49,18 @@ one process ever used that inherited connection. PR #1's config runs two.
 `tests/test_gunicorn_preload.py::test_forked_workers_get_their_own_database_connection` demonstrates it:
 without a fix, a forked child talks to Postgres through the parent's backend connection.
 
+## A third problem, found by the new CI job
+
+On its first run, the new job's `no-preload` variant failed: a worker died during boot with
+`psycopg2.errors.UniqueViolation … (relname, relnamespace)=(sessions_id_seq, …) already exists`.
+Without `--preload`, every gunicorn worker imports `app.py` at the same time. On a database where
+Flask-Session's `sessions` table doesn't exist yet, two workers both see it missing and both run
+`CREATE TABLE`. The loser's worker fails to boot, and gunicorn shuts down. The pre-existing Docker CI job
+runs the same way (fresh database, two workers, no preload), so it could hit this too. It passed on #1's
+runs and failed at its k6 step on #3's first run, very likely for this reason. Production wasn't exposed:
+Neon already has the table, so creating it is a no-op. It *would* hit any fresh environment, though: the
+planned Docker deployment, docker-compose, or a new database.
+
 ## Why testing didn't catch it
 
 - **The CI Docker job tested a different runtime.** It ran the Docker image with
@@ -71,6 +83,10 @@ without a fix, a forked child talks to Postgres through the parent's backend con
   happens before a `--preload` import. Workers never clear the directory, and neither does a config reload.
 - A `post_fork` hook disposes the inherited SQLAlchemy pool in each worker (`dispose(close=False)`), so each
   worker opens its own database connections.
+- `app.py` serialises schema setup (Flask-Session's table creation and `db.create_all()`) with a
+  transaction-scoped Postgres advisory lock, so workers starting together on a fresh database wait for
+  each other instead of racing. A regression test widens the race window deterministically (three
+  processes, the table-exists check slowed by 1 s), and fails without the lock.
 - New CI job `render-native` runs production's real conditions twice: Python 3.14.3, a
   requirements-only build, an empty `/tmp`, Render's default environment including
   `GUNICORN_CMD_ARGS`, and `gunicorn app:app`. One run uses Render's defaults, the other no preload. Each
@@ -82,7 +98,7 @@ without a fix, a forked child talks to Postgres through the parent's backend con
 
 | Item | Status |
 |---|---|
-| Fix the boot crash and the inherited-connection problem | PR #3 |
+| Fix the boot crash, the inherited-connection problem and the schema-creation race | PR #3 |
 | CI job that reproduces Render's native runtime and environment | PR #3 |
 | Add `render-native (render-defaults)` and `render-native (no-preload)` to the required checks on `main` | Owner (SETUP_CHECKLIST §1.2) |
 | Pin `PYTHON_VERSION` on Render to the version CI tests (3.14.3), so the two can't drift | Owner, optional |
