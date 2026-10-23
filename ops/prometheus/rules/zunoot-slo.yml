@@ -1,0 +1,192 @@
+# Zunoot SLO recording rules and multi-window, multi-burn-rate alerts.
+#
+# SLOs (reasoning in docs/SLO.md):
+#   availability: 99.5% of user requests succeed, rolling 30 days
+#   latency:      95% of user requests complete in < 1 s, rolling 30 days
+#
+# "User requests" excludes static files, the service worker, probes and the
+# metrics scrape (they'd dilute the SLIs with traffic that isn't a user).
+# A request "fails" if it returned 5xx OR the app logged an exception while
+# handling it (outcome="error"; see observability/middleware.py).
+#
+# Burn-rate thresholds follow the Google SRE Workbook, ch. 5 ("Alerting on
+# SLOs"), table 5-8, for a 30-day window:
+#   page:   14.4x over 1h (and 5m)  -> 2% of the monthly budget gone in an hour
+#   page:    6x   over 6h (and 30m) -> 5% gone in six hours
+#   ticket:  1x   over 3d (and 6h)  -> on course to spend the whole budget
+# The short window makes an alert stop soon after the problem stops.
+#
+# Tested with `promtool test rules ops/prometheus/tests/slo_test.yml` (CI).
+# Deployed to Grafana Cloud by .github/workflows/alert-rules.yml.
+
+groups:
+  # ---------------------------------------------------------------- SLIs ---
+  - name: zunoot-slo-sli
+    interval: 1m
+    rules:
+      # Availability: fraction of user requests that failed. `or vector(0)`
+      # makes "no errors" a real 0 rather than an empty result.
+      - record: zunoot:slo_availability_errors:ratio_rate5m
+        expr: |
+          (sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", outcome="error"}[5m])) or vector(0))
+          / sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[5m]))
+      - record: zunoot:slo_availability_errors:ratio_rate30m
+        expr: |
+          (sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", outcome="error"}[30m])) or vector(0))
+          / sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[30m]))
+      - record: zunoot:slo_availability_errors:ratio_rate1h
+        expr: |
+          (sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", outcome="error"}[1h])) or vector(0))
+          / sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[1h]))
+      - record: zunoot:slo_availability_errors:ratio_rate6h
+        expr: |
+          (sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", outcome="error"}[6h])) or vector(0))
+          / sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[6h]))
+      - record: zunoot:slo_availability_errors:ratio_rate3d
+        expr: |
+          (sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", outcome="error"}[3d])) or vector(0))
+          / sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[3d]))
+
+      # Latency: fraction of user requests that took 1 s or longer. 1.0 is a
+      # histogram bucket boundary, so this is exact, not interpolated.
+      - record: zunoot:slo_latency_slow:ratio_rate5m
+        expr: |
+          1 - sum(rate(zunoot_http_request_duration_seconds_bucket{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", le="1.0"}[5m]))
+            / sum(rate(zunoot_http_request_duration_seconds_count{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[5m]))
+      - record: zunoot:slo_latency_slow:ratio_rate30m
+        expr: |
+          1 - sum(rate(zunoot_http_request_duration_seconds_bucket{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", le="1.0"}[30m]))
+            / sum(rate(zunoot_http_request_duration_seconds_count{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[30m]))
+      - record: zunoot:slo_latency_slow:ratio_rate1h
+        expr: |
+          1 - sum(rate(zunoot_http_request_duration_seconds_bucket{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", le="1.0"}[1h]))
+            / sum(rate(zunoot_http_request_duration_seconds_count{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[1h]))
+      - record: zunoot:slo_latency_slow:ratio_rate6h
+        expr: |
+          1 - sum(rate(zunoot_http_request_duration_seconds_bucket{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", le="1.0"}[6h]))
+            / sum(rate(zunoot_http_request_duration_seconds_count{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[6h]))
+      - record: zunoot:slo_latency_slow:ratio_rate3d
+        expr: |
+          1 - sum(rate(zunoot_http_request_duration_seconds_bucket{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", le="1.0"}[3d]))
+            / sum(rate(zunoot_http_request_duration_seconds_count{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[3d]))
+
+      # Traffic volume, for the low-traffic guard on the page alerts.
+      - record: zunoot:slo_requests:increase1h
+        expr: sum(increase(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[1h]))
+      - record: zunoot:slo_requests:increase6h
+        expr: sum(increase(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[6h]))
+
+  # -------------------------------------------------- 30-day budget view ---
+  - name: zunoot-slo-budget
+    interval: 5m   # 30-day ranges are expensive; every 5 minutes is plenty
+    rules:
+      - record: zunoot:slo_availability_errors:ratio_rate30d
+        expr: |
+          (sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", outcome="error"}[30d])) or vector(0))
+          / sum(rate(zunoot_http_requests_total{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[30d]))
+      - record: zunoot:slo_latency_slow:ratio_rate30d
+        expr: |
+          1 - sum(rate(zunoot_http_request_duration_seconds_bucket{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js", le="1.0"}[30d]))
+            / sum(rate(zunoot_http_request_duration_seconds_count{route!~"/static/.*|/metrics|/livez|/healthz|/service-worker.js"}[30d]))
+      # 1 = untouched, 0 = spent, negative = SLO missed for the window.
+      - record: zunoot:slo_availability:error_budget_remaining
+        expr: 1 - zunoot:slo_availability_errors:ratio_rate30d / 0.005
+      - record: zunoot:slo_latency:error_budget_remaining
+        expr: 1 - zunoot:slo_latency_slow:ratio_rate30d / 0.05
+
+  # ------------------------------------------------------------- alerts ---
+  - name: zunoot-slo-alerts
+    interval: 1m
+    rules:
+      # Availability budget: 0.5% (SLO 99.5%).
+      - alert: ZunootAvailabilityFastBurn
+        # 14.4 x 0.005 = 0.072. Needs >= 30 requests in the hour: at Zunoot's
+        # traffic, one failure among a handful of requests is not an emergency
+        # (see docs/SLO.md, "Low traffic").
+        expr: |
+          zunoot:slo_availability_errors:ratio_rate1h > 0.072
+          and zunoot:slo_availability_errors:ratio_rate5m > 0.072
+          and zunoot:slo_requests:increase1h >= 30
+        for: 2m
+        labels: {severity: page, slo: availability}
+        annotations:
+          summary: "Zunoot is failing {{ $value | humanizePercentage }} of requests (fast burn)"
+          description: "At this rate the 30-day availability budget (0.5%) is gone in ~2 days."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootavailabilityfastburn"
+      - alert: ZunootAvailabilitySlowBurn
+        expr: |
+          zunoot:slo_availability_errors:ratio_rate6h > 0.03
+          and zunoot:slo_availability_errors:ratio_rate30m > 0.03
+          and zunoot:slo_requests:increase6h >= 60
+        for: 5m
+        labels: {severity: page, slo: availability}
+        annotations:
+          summary: "Zunoot error ratio {{ $value | humanizePercentage }} over 6h (slow burn)"
+          description: "Sustained errors: ~5% of the 30-day availability budget spent in 6 hours."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootavailabilityslowburn"
+      - alert: ZunootAvailabilityBudgetBurn
+        expr: |
+          zunoot:slo_availability_errors:ratio_rate3d > 0.005
+          and zunoot:slo_availability_errors:ratio_rate6h > 0.005
+        for: 30m
+        labels: {severity: ticket, slo: availability}
+        annotations:
+          summary: "Zunoot is on course to miss its 99.5% availability SLO"
+          description: "3-day error ratio {{ $value | humanizePercentage }} is above the 0.5% budget rate."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootavailabilitybudgetburn"
+
+      # Latency budget: 5% of requests may take >= 1 s (SLO: p95 < 1 s).
+      - alert: ZunootLatencyFastBurn
+        expr: |
+          zunoot:slo_latency_slow:ratio_rate1h > 0.72
+          and zunoot:slo_latency_slow:ratio_rate5m > 0.72
+          and zunoot:slo_requests:increase1h >= 30
+        for: 2m
+        labels: {severity: page, slo: latency}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of Zunoot requests are taking over 1 s"
+          description: "Most requests are slow. The 30-day latency budget is gone in ~2 days at this rate."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootlatencyfastburn"
+      - alert: ZunootLatencySlowBurn
+        expr: |
+          zunoot:slo_latency_slow:ratio_rate6h > 0.3
+          and zunoot:slo_latency_slow:ratio_rate30m > 0.3
+          and zunoot:slo_requests:increase6h >= 60
+        for: 5m
+        labels: {severity: page, slo: latency}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of Zunoot requests took over 1 s in the last 6h"
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootlatencyslowburn"
+      - alert: ZunootLatencyBudgetBurn
+        expr: |
+          zunoot:slo_latency_slow:ratio_rate3d > 0.05
+          and zunoot:slo_latency_slow:ratio_rate6h > 0.05
+        for: 30m
+        labels: {severity: ticket, slo: latency}
+        annotations:
+          summary: "Zunoot is on course to miss its latency SLO (p95 < 1 s)"
+          description: "{{ $value | humanizePercentage }} of requests over 3 days took >= 1 s (budget: 5%)."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootlatencybudgetburn"
+
+  # ------------------------------------------- the service isn't reporting ---
+  # Burn-rate alerts need requests to measure. If the app is down, or Grafana
+  # can't reach it, there are no requests and they stay silent. These cover that.
+  - name: zunoot-availability-alerts
+    interval: 1m
+    rules:
+      - alert: ZunootScrapeFailing
+        expr: up{job=~".*zunoot.*"} == 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Grafana Cloud can't scrape Zunoot's /metrics"
+          description: "The app is down, asleep, or /metrics is rejecting the token."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootscrapefailing"
+      - alert: ZunootMetricsAbsent
+        expr: absent(up{job=~".*zunoot.*"})
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "No Zunoot scrape target is reporting at all"
+          description: "The Grafana Cloud scrape job was deleted, renamed or disabled."
+          runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootmetricsabsent"

@@ -110,6 +110,25 @@ panel("stat", "Deployed version", [(f'max by (version) (zunoot_build_info{{{ALL}
       options={"reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "name", "colorMode": "none",
                "graphMode": "none"})
 
+row("SLOs (30-day rolling; from the recording rules in ops/prometheus/rules)")
+stat("Availability SLI (30d)", "1 - zunoot:slo_availability_errors:ratio_rate30d", 0, 4, "percentunit", decimals=3,
+     description="SLO: 99.5% of user requests succeed.",
+     thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.995}])
+stat("Availability budget left", "zunoot:slo_availability:error_budget_remaining", 4, 4, "percentunit", decimals=1,
+     thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 0.25}, {"color": "green", "value": 0.5}])
+stat("Latency SLI (30d, < 1 s)", "1 - zunoot:slo_latency_slow:ratio_rate30d", 8, 4, "percentunit", decimals=2,
+     description="SLO: 95% of user requests complete in under 1 s (p95 < 1 s).",
+     thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.95}])
+stat("Latency budget left", "zunoot:slo_latency:error_budget_remaining", 12, 4, "percentunit", decimals=1,
+     thresholds=[{"color": "red", "value": None}, {"color": "orange", "value": 0.25}, {"color": "green", "value": 0.5}])
+ts("Burn rate (1 = spending budget exactly on schedule)", [
+    ("zunoot:slo_availability_errors:ratio_rate1h / 0.005", "availability 1h"),
+    ("zunoot:slo_availability_errors:ratio_rate6h / 0.005", "availability 6h"),
+    ("zunoot:slo_latency_slow:ratio_rate1h / 0.05", "latency 1h"),
+    ("zunoot:slo_latency_slow:ratio_rate6h / 0.05", "latency 6h"),
+], 16, 8, "short", h=4,
+   description="Page thresholds: 14.4 (1h window) and 6 (6h window). Ticket: 1 (3d window).")
+
 row("Traffic and errors")
 ts("Requests per second by route", [(f'sum by (route) (rate(zunoot_http_requests_total{{{USER}}}[{RI}]))',
                                      "{{route}}")], 0, 12, "reqps")

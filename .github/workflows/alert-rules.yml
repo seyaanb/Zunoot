@@ -1,0 +1,81 @@
+# Deploys ops/prometheus/rules/*.yml to Grafana Cloud as Grafana-managed
+# recording and alert rules (Grafana's Prometheus-conversion API, via mimirtool).
+#
+# The rules live in the repo, are reviewed in PRs and unit-tested in CI
+# (ci.yml, job alert-rules). Merging to main publishes them. Nobody edits
+# alerts by hand in the UI; Grafana marks imported rules as provisioned, so
+# the UI won't let you.
+#
+# Needs (Settings -> Secrets and variables -> Actions), see SETUP_CHECKLIST.md:
+#   secret   GRAFANA_SA_TOKEN       service account token (Alerting rules writer)
+#   variable GRAFANA_URL            e.g. https://yourstack.grafana.net
+#   variable GRAFANA_PROM_DS_UID    UID of the stack's Prometheus data source
+# Without them the job just reports that it skipped.
+
+name: Deploy alert rules
+
+on:
+  push:
+    branches: [main]
+    paths: ["ops/prometheus/rules/**", ".github/workflows/alert-rules.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alert-rules
+  cancel-in-progress: false
+
+env:
+  MIMIRTOOL_VERSION: "3.2.3"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Unit-test the rules before publishing them
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            test rules ops/prometheus/tests/slo_test.yml
+
+      - name: Check configuration
+        id: cfg
+        env:
+          TOKEN: ${{ secrets.GRAFANA_SA_TOKEN }}
+          URL: ${{ vars.GRAFANA_URL }}
+          DS: ${{ vars.GRAFANA_PROM_DS_UID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$URL" ] || [ -z "$DS" ]; then
+            echo "::notice::Grafana Cloud not configured (see SETUP_CHECKLIST.md section 4); skipping deploy."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install mimirtool
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          curl -fsSL -o mimirtool \
+            "https://github.com/grafana/mimir/releases/download/mimir-${MIMIRTOOL_VERSION}/mimirtool-linux-amd64"
+          chmod +x mimirtool
+
+      - name: Load rules into Grafana
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          MIMIR_ADDRESS: ${{ vars.GRAFANA_URL }}/api/convert/
+          MIMIR_AUTH_TOKEN: ${{ secrets.GRAFANA_SA_TOKEN }}
+          MIMIR_TENANT_ID: "1"
+          DS_UID: ${{ vars.GRAFANA_PROM_DS_UID }}
+        run: |
+          # mimirtool takes the Grafana folder ("namespace") from the file, but
+          # promtool rejects that key, so it is added to a temporary copy only.
+          mkdir -p build
+          for f in ops/prometheus/rules/*.yml; do
+            { echo "namespace: zunoot"; cat "$f"; } > "build/$(basename "$f")"
+          done
+          ./mimirtool rules load build/*.yml \
+            --extra-headers "X-Grafana-Alerting-Datasource-UID=${DS_UID}"

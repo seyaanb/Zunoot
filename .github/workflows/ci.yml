@@ -62,6 +62,22 @@ jobs:
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
 
+  # SLO recording rules and alerts: syntax check plus unit tests that prove
+  # each alert fires (or stays quiet) on synthetic series.
+  alert-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: promtool check + test
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            check rules ops/prometheus/rules/zunoot-slo.yml
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            test rules ops/prometheus/tests/slo_test.yml
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            check config ops/prometheus/prometheus.local.yml
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -1,0 +1,122 @@
+# Unit tests for ops/prometheus/rules/zunoot-slo.yml.
+# Run: promtool test rules ops/prometheus/tests/slo_test.yml   (CI does this)
+#
+# Series notation: `a+bxN` = start at a, add b each interval, N times.
+# With interval 1m, `0+90x120` is a counter growing by 90 requests a minute.
+
+rule_files:
+  - ../rules/zunoot-slo.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. Healthy traffic: no alerts, budgets untouched.
+  - interval: 1m
+    input_series:
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="200",outcome="ok"}'
+        values: '0+100x180'
+      - series: 'zunoot_http_request_duration_seconds_bucket{job="zunoot",route="/library/",method="GET",le="1.0"}'
+        values: '0+100x180'
+      - series: 'zunoot_http_request_duration_seconds_count{job="zunoot",route="/library/",method="GET"}'
+        values: '0+100x180'
+      - series: 'up{job="zunoot"}'
+        values: '1+0x180'
+    promql_expr_test:
+      - expr: zunoot:slo_availability_errors:ratio_rate1h
+        eval_time: 90m
+        exp_samples: [{labels: 'zunoot:slo_availability_errors:ratio_rate1h', value: 0}]
+      - expr: zunoot:slo_latency_slow:ratio_rate1h
+        eval_time: 90m
+        exp_samples: [{labels: 'zunoot:slo_latency_slow:ratio_rate1h', value: 0}]
+    alert_rule_test:
+      - {eval_time: 90m, alertname: ZunootAvailabilityFastBurn, exp_alerts: []}
+      - {eval_time: 90m, alertname: ZunootLatencyFastBurn, exp_alerts: []}
+      - {eval_time: 90m, alertname: ZunootScrapeFailing, exp_alerts: []}
+
+  # 2. 10% of requests failing (above the 7.2% fast-burn threshold): page.
+  #    Probe and static traffic must not count toward the SLI.
+  - interval: 1m
+    input_series:
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="200",outcome="ok"}'
+        values: '0+90x120'
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="302",outcome="error"}'
+        values: '0+10x120'
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/livez",method="GET",status="200",outcome="ok"}'
+        values: '0+1000x120'
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/static/<path:filename>",method="GET",status="200",outcome="ok"}'
+        values: '0+1000x120'
+    promql_expr_test:
+      - expr: zunoot:slo_availability_errors:ratio_rate1h
+        eval_time: 70m
+        exp_samples: [{labels: 'zunoot:slo_availability_errors:ratio_rate1h', value: 0.1}]
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: ZunootAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: availability}
+            exp_annotations:
+              summary: "Zunoot is failing 10% of requests (fast burn)"
+              description: "At this rate the 30-day availability budget (0.5%) is gone in ~2 days."
+              runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootavailabilityfastburn"
+
+  # 3. Low traffic: 3 requests/hour, one of which fails (33% error ratio).
+  #    The fast-burn page must NOT fire (fewer than 30 requests in the hour).
+  - interval: 1m
+    input_series:
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="200",outcome="ok"}'
+        values: '0+0.0333333x180'
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="500",outcome="error"}'
+        values: '0+0.0166666x180'
+    alert_rule_test:
+      - {eval_time: 120m, alertname: ZunootAvailabilityFastBurn, exp_alerts: []}
+      - {eval_time: 120m, alertname: ZunootAvailabilitySlowBurn, exp_alerts: []}
+
+  # 4. A brief error spike that has already stopped: the short (5m) window
+  #    keeps the fast-burn alert from firing once the problem is over.
+  - interval: 1m
+    input_series:
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="200",outcome="ok"}'
+        values: '0+50x30 1550+100x60'
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="500",outcome="error"}'
+        values: '0+50x30 1500+0x60'
+    alert_rule_test:
+      - {eval_time: 60m, alertname: ZunootAvailabilityFastBurn, exp_alerts: []}
+
+  # 5. Latency: 80% of requests slower than 1 s -> latency fast burn pages.
+  - interval: 1m
+    input_series:
+      - series: 'zunoot_http_requests_total{job="zunoot",route="/library/",method="GET",status="200",outcome="ok"}'
+        values: '0+100x120'
+      - series: 'zunoot_http_request_duration_seconds_bucket{job="zunoot",route="/library/",method="GET",le="1.0"}'
+        values: '0+20x120'
+      - series: 'zunoot_http_request_duration_seconds_count{job="zunoot",route="/library/",method="GET"}'
+        values: '0+100x120'
+    promql_expr_test:
+      - expr: zunoot:slo_latency_slow:ratio_rate1h
+        eval_time: 70m
+        exp_samples: [{labels: 'zunoot:slo_latency_slow:ratio_rate1h', value: 0.8}]
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: ZunootLatencyFastBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: latency}
+            exp_annotations:
+              summary: "80% of Zunoot requests are taking over 1 s"
+              description: "Most requests are slow. The 30-day latency budget is gone in ~2 days at this rate."
+              runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootlatencyfastburn"
+
+  # 6. Scrape failing for 5+ minutes -> page, even though no requests are seen.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="zunoot"}'
+        values: '1x10 0x10'
+    alert_rule_test:
+      - {eval_time: 13m, alertname: ZunootScrapeFailing, exp_alerts: []}
+      - eval_time: 18m
+        alertname: ZunootScrapeFailing
+        exp_alerts:
+          - exp_labels: {severity: page, job: zunoot}
+            exp_annotations:
+              summary: "Grafana Cloud can't scrape Zunoot's /metrics"
+              description: "The app is down, asleep, or /metrics is rejecting the token."
+              runbook_url: "https://github.com/seyaanb/zunoot/blob/main/docs/RUNBOOK.md#zunootscrapefailing"
