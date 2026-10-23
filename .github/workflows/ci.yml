@@ -48,7 +48,7 @@ jobs:
       - name: ruff (strict, infrastructure code)
         run: >
           ruff check --output-format=github --select E,F,W,B
-          blueprints/ops tests gunicorn.conf.py observability ops $(ls -d scripts 2>/dev/null)
+          blueprints/ops tests gunicorn.conf.py observability ops
 
   lint-infra:
     runs-on: ubuntu-latest
@@ -57,6 +57,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: hadolint (Dockerfile)
         run: docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" hadolint/hadolint:v2.15.1 < Dockerfile
+      - name: shellcheck (backup scripts)
+        run: shellcheck scripts/backup/*.sh
       - name: actionlint (GitHub workflows)
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
@@ -110,6 +112,56 @@ jobs:
         with:
           name: pytest-report
           path: pytest-report.xml
+
+  # The backup and restore scripts, end to end on every PR: dump -> test
+  # restore -> encrypt -> restore from the encrypted file -> row counts match.
+  # Also proves restore.sh refuses a non-empty target.
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: source
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      PG: postgresql://postgres:postgres@localhost:5432
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -q && sudo apt-get install -y -q age postgresql-client
+      - name: Seed a source database
+        run: |
+          psql "$PG/source" -v ON_ERROR_STOP=1 -q -f db/schema.sql -f db/seed_dev.sql
+          psql "$PG/source" -v ON_ERROR_STOP=1 -q <<'SQL'
+          insert into students(username, first_name, last_name, password, email_address) values ('ci','c','i','x','ci@e.com');
+          insert into purchases values ('ci', 1), ('ci', 13);
+          insert into subjects(subject_name, username) values ('S', 'ci');
+          insert into topics(topic_name, subject_id) values ('T', 1);
+          insert into flashcards(front, back, topic_id) select 'q' || g, 'a', 1 from generate_series(1, 50) g;
+          SQL
+          psql "$PG/source" -c "create database verify" -c "create database restored"
+      - name: Back up (local output, no S3)
+        run: |
+          age-keygen -o key.txt
+          SOURCE_DATABASE_URL="$PG/source" VERIFY_DATABASE_URL="$PG/verify" \
+          AGE_RECIPIENT="$(age-keygen -y key.txt)" OUTPUT_DIR=out scripts/backup/backup.sh
+      - name: Restore from the encrypted file and verify
+        run: |
+          ZUNOOT_PROD_HOST=prod.invalid scripts/backup/restore.sh out/*.dump.age \
+            --target "$PG/restored" --identity key.txt --yes
+          test "$(psql "$PG/restored" -XAtc 'select count(*) from flashcards')" = 50
+      - name: Restore must refuse a non-empty target
+        run: |
+          if ZUNOOT_PROD_HOST=prod.invalid scripts/backup/restore.sh out/*.dump.age \
+               --target "$PG/restored" --identity key.txt --yes; then
+            echo "::error::restore.sh overwrote a non-empty database"; exit 1
+          fi
 
   # Build the exact image Render will build, start it against a throwaway
   # Postgres, and check it boots, answers health checks and runs as non-root.

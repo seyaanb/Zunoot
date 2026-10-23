@@ -21,8 +21,9 @@ tests/
 docs/
 ops/
 loadtest/
-scripts/backup/
+
 docker-compose*.yml
 Dockerfile
 *.md
 !README.md
+scripts/
