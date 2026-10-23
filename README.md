@@ -1,5 +1,7 @@
 
 # Zunoot
+
+[![CI](https://github.com/seyaanb/Zunoot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/seyaanb/Zunoot/actions/workflows/ci.yml)
  
 Zunoot is a flashcard app built around spaced repetition, with a social layer bolted on top: guilds, a shop, a community library people can pull decks from. I built it originally as my A-level Computer Science NEA project, then went back later and did a proper pass on the security and infrastructure once it had actual users on it.
  
@@ -47,12 +49,16 @@ Coins buy avatars and themes, seven built-in themes swapped through CSS custom p
  
 ## Running it locally
 
+### Run locally with docker compose
+
 With Docker (app + Postgres, seeded with the dev schema):
 
 ```bash
 docker compose up --build        # http://localhost:5000
 docker compose --profile test run --rm test   # test suite in a container
 ```
+
+### Run locally without Docker
 
 Without Docker, against any local Postgres:
 
@@ -63,6 +69,8 @@ createdb zunoot && psql zunoot -f db/schema.sql -f db/seed_dev.sql
 cp .env.example .env              # then edit
 flask run
 ```
+
+### Run tests
 
 Tests need a local database whose name ends in `_test` (the suite resets its schema and refuses to run against anything else):
 
@@ -77,14 +85,48 @@ TEST_DATABASE_URL=postgresql://localhost/zunoot_test pytest
 
 | | |
 |---|---|
-| Health | `/livez` (process up, Render's health check), `/healthz` (process + database) |
-| CI/CD | `.github/workflows/ci.yml`: lint, tests against Postgres, alert-rule tests, backup round trip, production-image boot, k6 smoke. Render deploys `main` only after CI passes. |
+| Health | `/livez` (process up, doesn't touch the database), `/healthz` (process + database) |
+| CI/CD | `.github/workflows/ci.yml`: lint, tests against Postgres, alert-rule tests, backup round trip, production-image boot, k6 smoke. Runs on every pull request and every push to `main`. |
 | Observability | Prometheus metrics on `/metrics` (token), JSON logs with request IDs, Grafana dashboard in `ops/grafana/` |
 | SLOs and alerts | [`docs/SLO.md`](docs/SLO.md), rules in `ops/prometheus/rules/`, [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
-| Backups | nightly, encrypted, restore-tested: [`docs/RESTORE_DRILL.md`](docs/RESTORE_DRILL.md) |
+| Backups | nightly backup workflow (encrypted, restore-tested) and a restore script; the workflow needs its secrets configured before it can run: [`docs/RESTORE_DRILL.md`](docs/RESTORE_DRILL.md) |
 | Load testing | [`loadtest/README.md`](loadtest/README.md), results in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) |
 | Setup steps | [`SETUP_CHECKLIST.md`](SETUP_CHECKLIST.md) |
 | Design notes | [`OPS_NOTES.md`](OPS_NOTES.md), with trade-offs and the questions they answer |
+
+## Reliability
+
+This describes what's in the code and CI. Connecting it to hosted services (Grafana Cloud, Render's health check, the backup bucket) is a separate set of manual steps in [`SETUP_CHECKLIST.md`](SETUP_CHECKLIST.md).
+
+**Metrics.** Prometheus metrics on `/metrics`, served only when the `METRICS_TOKEN` environment variable is set and the request sends that token as a bearer token. Without it, the endpoint returns 404. The metrics include:
+- requests by route template, method, status code and outcome. A request counts as failed if it returned a 5xx *or* the app logged an exception while handling it, since most routes catch errors and redirect.
+- a request-latency histogram by route
+- database timing: latency per query function, time to open a connection, and per request the number of queries, new connections and total database time
+
+Routes are labelled by their URL rule (`/library/<subject_name>`), never the raw path, so user content never ends up in a label. Values are aggregated across gunicorn's worker processes. The Grafana dashboard definition is `ops/grafana/zunoot-overview.json`.
+
+**Structured logging.** Every log line, from the app, Flask or gunicorn, is one JSON object on stdout with a `request_id`. Each request also gets one access-log line with its route, status, duration and database query/connection counts. An incoming `X-Request-ID` header is reused if it's safe to log, otherwise one is generated, and either way it's returned in the response's `X-Request-ID` header.
+
+**SLOs and burn-rate alert rules.** [`docs/SLO.md`](docs/SLO.md) defines two SLOs over a rolling 30 days, and explains why those targets fit this app:
+- 99.5% of user requests succeed
+- 95% of user requests complete in under 1 s (p95 < 1 s)
+
+`ops/prometheus/rules/zunoot-slo.yml` holds the matching recording rules and multi-window, multi-burn-rate alert rules, following the Google SRE Workbook:
+- page at 14.4× budget burn over 1 hour, and at 6× over 6 hours. Both need a minimum number of requests, so a single failure at low traffic doesn't page.
+- raise a ticket at 1× over 3 days
+- alerts for when the metrics can't be scraped at all
+
+The rules are unit-tested with `promtool` in CI.
+
+**CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and every push to `main`:
+- **lint:** ruff, hadolint on the Dockerfile, actionlint on the workflows, shellcheck on the backup scripts, plus a check that the dashboard JSON matches its generator
+- **tests:** pytest against a real PostgreSQL 16 database
+- **alert rules:** promtool syntax check and unit tests
+- **backup/restore:** backs up a seeded database, encrypts it, restores it, compares row counts, and checks that the restore refuses a non-empty target
+- **Docker image smoke test:** builds the production image, checks it doesn't run as root, starts it against a throwaway Postgres, and probes `/livez`, `/healthz` and the landing page
+- **k6 user flow:** against that running container, registers a user, builds a small library, runs review sessions (rating cards, then ending the session) and deletes the account. The job fails on any failed check, any request error, or p95 latency over 1 s.
+
+The reasoning behind each piece, its trade-offs, and the questions it's designed to answer are in [`OPS_NOTES.md`](OPS_NOTES.md).
 
 ## What got fixed in the security pass
  
@@ -100,7 +142,7 @@ Two SQLite database files with real usernames and password hashes from testing h
  
 ## Bugs fixed in October 2026
 
-Writing a proper test suite turned up sixteen bugs, including a crash on every review request, a query that overwrote other users' cards, and several missing authorisation checks. Each one is written up in [`docs/BUGFIXES.md`](docs/BUGFIXES.md) (symptom, root cause, fix, regression test), and `tests/test_bugfixes.py` has a test for each that fails against the old code.
+Writing a proper test suite turned up sixteen bugs, including a crash on every review request, a query that overwrote other users' cards, and several missing authorisation checks. Each one is written up in [`docs/BUGFIXES.md`](docs/BUGFIXES.md) (symptom, root cause, fix, regression test), and `tests/test_bugfixes.py` has a regression test that fails against the old code for each of BUG-1 to BUG-12 and BUG-16. BUG-13 (exceptions not logged) is covered by the observability tests; BUG-14 (a JavaScript error) and BUG-15 (stray `print` calls) have no automated test.
 
 ## Known gaps
  
