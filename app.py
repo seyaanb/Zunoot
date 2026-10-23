@@ -14,6 +14,7 @@ from config import Config
 import backend.queries as q
 import backend.user as u
 import os
+import observability
 
 #initialise Flask app
 app = Flask(__name__, instance_relative_config=True)
@@ -43,6 +44,9 @@ def load_user(username):
 Session(app)
 with app.app_context():
     db.create_all()
+
+#metrics, structured JSON logs and request IDs (see OPS_NOTES.md)
+observability.init_app(app, db)
 
 #default route
 @app.route("/")

@@ -9,6 +9,12 @@ WEB_CONCURRENCY / GUNICORN_THREADS.
 """
 
 import os
+import shutil
+
+# Prometheus multi-process mode: each worker writes its metric values to files
+# in this directory, and /metrics merges them. Set here, in the master, before
+# any worker starts or imports prometheus_client.
+os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", "/tmp/zunoot-prometheus")
 
 bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 workers = int(os.environ.get("WEB_CONCURRENCY", "2"))
@@ -31,6 +37,23 @@ preload_app = False
 
 # Access logging is done by the app itself as structured JSON (one line per
 # request, with request ID and timings), so gunicorn's own access log is off.
+# gunicorn's own lines (boot, worker timeouts) use the same JSON formatter.
 accesslog = None
 errorlog = "-"
 loglevel = os.environ.get("LOG_LEVEL", "info").lower()
+logconfig_dict = __import__("observability.logs", fromlist=["GUNICORN_LOGCONFIG"]).GUNICORN_LOGCONFIG
+
+
+def on_starting(server):
+    """Start each boot with an empty metrics directory (stale files from a
+    previous run would be merged into the new process's counters)."""
+    path = os.environ["PROMETHEUS_MULTIPROC_DIR"]
+    shutil.rmtree(path, ignore_errors=True)
+    os.makedirs(path, exist_ok=True)
+
+
+def child_exit(server, worker):
+    """Tell prometheus_client a worker is gone, so its live gauges stop
+    counting. Its counters are kept; they are still part of the totals."""
+    from prometheus_client import multiprocess
+    multiprocess.mark_process_dead(worker.pid)

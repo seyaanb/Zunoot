@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from observability import db as obs_db
 import backend.session_queue as sq
 from backend.flashcard_library import flashcard as f
 from datetime import datetime, timezone, timedelta
@@ -8,7 +9,8 @@ def database():
     url = os.environ.get("DATABASE_URL")
     if url:
         url = url.strip().strip('"').strip("'")
-    return psycopg2.connect(url)
+    # same as psycopg2.connect(url), plus connect/query timing for /metrics
+    return obs_db.connect(url)
 
 ids = {
     "Library": "username",

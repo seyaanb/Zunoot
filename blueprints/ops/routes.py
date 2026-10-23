@@ -10,13 +10,18 @@
 /healthz - "can this instance actually serve users?" Runs SELECT 1 against
            Postgres with a short timeout. Used by the external uptime monitor
            (every 5 minutes) and by humans. Returns 503 if the DB is unreachable.
+
+/metrics - Prometheus metrics, readable only with the METRICS_TOKEN bearer
+           token (Grafana Cloud's scraper sends it). Without METRICS_TOKEN set,
+           the endpoint is disabled (404) rather than left open.
 """
 
+import hmac
 import os
 import time
 
 import psycopg2
-from flask import jsonify
+from flask import Response, jsonify, request
 
 from . import ops_bp
 
@@ -78,3 +83,29 @@ def healthz():
     resp.status_code = 200 if ok else 503
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+def _metrics_authorized():
+    expected = os.environ.get("METRICS_TOKEN", "")
+    header = request.headers.get("Authorization", "")
+    scheme, _, supplied = header.partition(" ")
+    if scheme.lower() == "bearer":
+        token = supplied.strip()
+    elif request.authorization and request.authorization.type == "basic":
+        token = request.authorization.password or ""  # Basic auth: any user, token as password
+    else:
+        return False
+    # constant-time comparison: don't leak how much of the token matched
+    return hmac.compare_digest(token.encode(), expected.encode())
+
+
+@ops_bp.route("/metrics")
+def metrics():
+    if not os.environ.get("METRICS_TOKEN"):
+        return Response("not found\n", status=404, mimetype="text/plain")
+    if not _metrics_authorized():
+        return Response("unauthorized\n", status=401, mimetype="text/plain",
+                        headers={"WWW-Authenticate": 'Bearer realm="metrics"'})
+    from observability.metrics import exposition
+    body, content_type = exposition()
+    return Response(body, mimetype=None, content_type=content_type, headers={"Cache-Control": "no-store"})

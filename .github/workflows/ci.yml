@@ -39,12 +39,16 @@ jobs:
       # Whole repo: rules that catch crashes (syntax errors, undefined names).
       - name: ruff (whole repo, crash-class rules)
         run: ruff check --output-format=github .
+      - name: Grafana dashboard JSON is up to date with its generator
+        run: |
+          python ops/grafana/build_dashboard.py
+          git diff --exit-code ops/grafana/zunoot-overview.json
       # New infrastructure code is held to the full rule set. Older app code
       # joins this list file by file (a lint "ratchet").
       - name: ruff (strict, infrastructure code)
         run: >
           ruff check --output-format=github --select E,F,W,B
-          blueprints/ops tests gunicorn.conf.py $(ls -d observability scripts 2>/dev/null)
+          blueprints/ops tests gunicorn.conf.py observability ops $(ls -d scripts 2>/dev/null)
 
   lint-infra:
     runs-on: ubuntu-latest
