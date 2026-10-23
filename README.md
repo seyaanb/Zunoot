@@ -23,7 +23,7 @@ Each flashcard tracks `interval`, `repetition_no`, and `easiness_factor`, starti
  
 ### Review sessions
  
-A review session runs on a hand-rolled circular queue, front and rear pointers over a fixed list. Spaced mode only surfaces cards whose `next_review` date has passed, skipping past the rest. Unspaced mode goes through everything in the current subtree regardless of date. The Flask session stores the current card's front and back and whether it's spaced, nothing else. When the session ends, every reviewed card's updated SM-2 state gets written back to the database in one batch.
+A review session runs on a hand-rolled circular queue, front and rear pointers over a fixed list. Spaced mode only surfaces cards whose `next_review` date has passed, skipping past the rest. Unspaced mode goes through everything in the current subtree regardless of date. The Flask session stores only plain data: the queue pointers, whether it's spaced, and each card's ID and SM-2 state. Card text is read from the database (scoped to the logged-in user) when a card is shown. When the session ends, every reviewed card's updated SM-2 state gets written back to the database in one batch.
  
 ### Guilds and leaderboards
  
@@ -46,21 +46,46 @@ Coins buy avatars and themes, seven built-in themes swapped through CSS custom p
 `students` and `guilds` reference each other: a student has `guild_name`, a guild has `leader_username`. Inserting either table first hits a foreign key that doesn't exist yet, which came up during the SQLite migration (more below). Subjects, topics, and flashcards each have a `position` column for drag-and-drop ordering. Every table only stores attributes describing its own entity, and the schema's normalised to 3NF/BCNF, done deliberately, not just how the tables happened to end up. `purchases` resolves the many-to-many between students and shop items. The `community*` tables mirror the subject/topic/flashcard structure separately, since an upload is its own copy rather than a live reference back to the original.
  
 ## Running it locally
- 
+
+With Docker (app + Postgres, seeded with the dev schema):
+
 ```bash
-git clone <repo-url>
-cd zunoot
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+docker compose up --build        # http://localhost:5000
+docker compose --profile test run --rm test   # test suite in a container
 ```
- 
-Needs a `.env` with `SECRET_KEY` and a Postgres connection string (Neon or otherwise). Nothing runs against SQLite any more.
- 
+
+Without Docker, against any local Postgres:
+
 ```bash
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+createdb zunoot && psql zunoot -f db/schema.sql -f db/seed_dev.sql
+cp .env.example .env              # then edit
 flask run
 ```
- 
+
+Tests need a local database whose name ends in `_test` (the suite resets its schema and refuses to run against anything else):
+
+```bash
+createdb zunoot_test
+TEST_DATABASE_URL=postgresql://localhost/zunoot_test pytest
+```
+
+`db/schema.sql` is reconstructed from the code for dev and tests; it is never applied to production.
+
+## Operations
+
+| | |
+|---|---|
+| Health | `/livez` (process up, Render's health check), `/healthz` (process + database) |
+| CI/CD | `.github/workflows/ci.yml`: lint, tests against Postgres, alert-rule tests, backup round trip, production-image boot, k6 smoke. Render deploys `main` only after CI passes. |
+| Observability | Prometheus metrics on `/metrics` (token), JSON logs with request IDs, Grafana dashboard in `ops/grafana/` |
+| SLOs and alerts | [`docs/SLO.md`](docs/SLO.md), rules in `ops/prometheus/rules/`, [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
+| Backups | nightly, encrypted, restore-tested: [`docs/RESTORE_DRILL.md`](docs/RESTORE_DRILL.md) |
+| Load testing | [`loadtest/README.md`](loadtest/README.md), results in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) |
+| Setup steps | [`SETUP_CHECKLIST.md`](SETUP_CHECKLIST.md) |
+| Design notes | [`OPS_NOTES.md`](OPS_NOTES.md), with trade-offs and the questions they answer |
+
 ## What got fixed in the security pass
  
 Built this for coursework first, went back to it later once people were actually using it. Found a few things.
@@ -73,6 +98,10 @@ Migrating off SQLite was the bigger project. Rebuilt the schema in Postgres, seq
  
 Two SQLite database files with real usernames and password hashes from testing had been committed at some point. Deleting them wasn't enough since they were still in git history, so I ran `git filter-repo` and checked a fresh clone afterward to confirm they were actually gone.
  
+## Bugs fixed in October 2026
+
+Writing a proper test suite turned up sixteen bugs, including a crash on every review request, a query that overwrote other users' cards, and several missing authorisation checks. Each one is written up in [`docs/BUGFIXES.md`](docs/BUGFIXES.md) (symptom, root cause, fix, regression test), and `tests/test_bugfixes.py` has a test for each that fails against the old code.
+
 ## Known gaps
  
 The weekly points reset checks the `pointsreset` table against the current time on request rather than running on a schedule, so it only fires whenever the first request after Monday midnight happens to land. Email validation on registration checks the format with a regex, nothing confirms the address is real.

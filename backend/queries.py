@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from observability import db as obs_db
 import backend.session_queue as sq
 from backend.flashcard_library import flashcard as f
 from datetime import datetime, timezone, timedelta
@@ -8,7 +9,8 @@ def database():
     url = os.environ.get("DATABASE_URL")
     if url:
         url = url.strip().strip('"').strip("'")
-    return psycopg2.connect(url)
+    # same as psycopg2.connect(url), plus connect/query timing for /metrics
+    return obs_db.connect(url)
 
 ids = {
     "Library": "username",
@@ -33,30 +35,56 @@ def retrieve_deck():
     return deck
 
 
-def push_deck(deck):
+def push_deck(deck, username):
+    '''
+    writes the SM-2 state of every reviewed card back to the database in one transaction.
+
+    previously this matched rows with WHERE front = %s, which overwrote every card with the
+    same front text, including other users' cards. it now matches on flashcard_id and only
+    touches cards owned by `username`. front/back are no longer written: the session only
+    holds scheduling state, so it can't clobber an edit made while a review was in progress.
+    '''
+    conn = database()
+    try:
+        cursor = conn.cursor()
+        sql = '''
+        UPDATE flashcards AS f
+        SET review_interval = %s, repetition_no = %s, easiness_factor = %s,
+            last_review = %s, next_review = %s
+        FROM topics t JOIN subjects s ON s.subject_id = t.subject_id
+        WHERE f.flashcard_id = %s AND f.topic_id = t.topic_id AND s.username = %s
+        '''
+        for flashcard in deck:
+            cursor.execute(sql, (flashcard.interval, flashcard.repetition_no,
+                                 round(flashcard.easiness_factor, 2), flashcard.last_review,
+                                 flashcard.next_review, flashcard.flashcard_id, username))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def get_flashcard_text(flashcard_id, username):
+    '''returns (front, back) for a card owned by username, or None'''
     conn = database()
     cursor = conn.cursor()
-    for flashcard in deck:
-        sql = '''
-        UPDATE flashcards
-        SET front = %s, back = %s, review_interval = %s, repetition_no = %s, easiness_factor = %s,
-            last_review = %s, next_review = %s
-        WHERE front = %s
-        '''
-        
-        front = flashcard.getName()
-        back = flashcard.getBack()
-        interval = flashcard.interval
-        repetition_no = flashcard.repetition_no
-        easiness_factor = round(flashcard.easiness_factor, 2)
-        last_review = flashcard.last_review
-        next_review = flashcard.next_review
-        
-        cursor.execute(sql, (front, back, interval, repetition_no, easiness_factor,
-                             last_review, next_review, front))
-        
-        conn.commit()
+    cursor.execute('''
+                   select f.front, f.back from flashcards f
+                   join topics t on t.topic_id = f.topic_id
+                   join subjects s on s.subject_id = t.subject_id
+                   where f.flashcard_id = %s and s.username = %s''', (flashcard_id, username))
+    row = cursor.fetchone()
     conn.close()
+    return row
+
+def subject_belongs_to_user(subject_id, username):
+    conn = database()
+    cursor = conn.cursor()
+    cursor.execute("select 1 from subjects where subject_id = %s and username = %s", (subject_id, username))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
 
 def delete_subject(subject_id):
     conn = database()
@@ -258,73 +286,99 @@ def get_topic_id(topic, subject_id):
 
     return topic_id
 
-def update_order(item_type, order):
-    if item_type not in ids:
+# ownership-scoped reorder statements. previously any logged-in user could reorder any
+# other user's subjects/topics/flashcards by sending their IDs.
+_reorder_sql = {
+    "Subject": '''update subjects set position = %s
+                  where subject_id = %s and username = %s''',
+    "Topic": '''update topics t set position = %s
+                from subjects s
+                where t.topic_id = %s and s.subject_id = t.subject_id and s.username = %s''',
+    "Flashcard": '''update flashcards f set position = %s
+                    from topics t join subjects s on s.subject_id = t.subject_id
+                    where f.flashcard_id = %s and t.topic_id = f.topic_id and s.username = %s''',
+}
+
+def update_order(item_type, order, username):
+    if item_type not in _reorder_sql:
         raise ValueError(f"Invalid item_type: {item_type}")
 
     conn = database()
-    cursor = conn.cursor()
-    
-    
-    for item in order:
-        sql = f'''update {item_type.lower()}s set position = %s where {ids[item_type]} = %s'''
-        cursor.execute(sql, (item["position"], item["id"]))
-    
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        for item in order:
+            cursor.execute(_reorder_sql[item_type], (int(item["position"]), int(item["id"]), username))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 #community queries
 def add_community_subject(subject_object, username):
+    '''
+    uploads a subject (with its topics and flashcards) to the community library, replacing any
+    earlier upload by the same user with the same name. the delete and the inserts run in one
+    transaction, so a failure part-way through can no longer leave a half-uploaded subject or
+    lose the previous upload.
+    '''
     conn = database()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-                   insert into communitysubjects (community_subject_name, uploader_username) 
-                   values (%s, %s) RETURNING community_subject_id
-                   ''', (subject_object.getName(), username))
-                   
-    subject_id = cursor.fetchone()[0]
-    conn.commit()
-    
-    for topic in subject_object.children:
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''delete from communitysubjects
+                          where uploader_username = %s and community_subject_name = %s''',
+                       (username, subject_object.getName()))
         cursor.execute('''
-                       insert into communitytopics (community_topic_name, community_subject_id, uploader_username) 
-                       values (%s, %s, %s) RETURNING community_topic_id
-                       ''', (topic.getName(), subject_id, username))
-                       
-        topic_id = cursor.fetchone()[0]
-        conn.commit()
-        
-        for flashcard in topic.children:
+                       insert into communitysubjects (community_subject_name, uploader_username)
+                       values (%s, %s) RETURNING community_subject_id
+                       ''', (subject_object.getName(), username))
+        subject_id = cursor.fetchone()[0]
+
+        for topic in subject_object.children:
             cursor.execute('''
-                           insert into communityflashcards (community_topic_id, front, back) 
-                           values (%s, %s, %s)
-                           ''', (topic_id, flashcard.getName(), flashcard.getBack()))
-            conn.commit()
-            
-    conn.close()
+                           insert into communitytopics (community_topic_name, community_subject_id, uploader_username)
+                           values (%s, %s, %s) RETURNING community_topic_id
+                           ''', (topic.getName(), subject_id, username))
+            topic_id = cursor.fetchone()[0]
+            for flashcard in topic.children:
+                cursor.execute('''
+                               insert into communityflashcards (community_topic_id, front, back)
+                               values (%s, %s, %s)
+                               ''', (topic_id, flashcard.getName(), flashcard.getBack()))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def add_community_topic(topic_object, username):
+    '''uploads a standalone topic, replacing an earlier standalone upload with the same name'''
     conn = database()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-                   insert into communitytopics (community_topic_name, uploader_username) 
-                   values (%s, %s) RETURNING community_topic_id
-                   ''', (topic_object.getName(), username))
-                   
-    topic_id = cursor.fetchone()[0]
-    conn.commit()
-    
-    for flashcard in topic_object.children:
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''delete from communitytopics
+                          where uploader_username = %s and community_topic_name = %s
+                          and community_subject_id is null''',
+                       (username, topic_object.getName()))
         cursor.execute('''
-                       insert into communityflashcards (community_topic_id, front, back) 
-                       values (%s, %s, %s)
-                       ''', (topic_id, flashcard.getName(), flashcard.getBack()))
+                       insert into communitytopics (community_topic_name, uploader_username)
+                       values (%s, %s) RETURNING community_topic_id
+                       ''', (topic_object.getName(), username))
+        topic_id = cursor.fetchone()[0]
+        for flashcard in topic_object.children:
+            cursor.execute('''
+                           insert into communityflashcards (community_topic_id, front, back)
+                           values (%s, %s, %s)
+                           ''', (topic_id, flashcard.getName(), flashcard.getBack()))
         conn.commit()
-        
-    conn.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def get_community_subjects():
     conn = database()
@@ -417,23 +471,29 @@ def import_community_topic(subject_id, community_topic_id, topic_name):
         add_flashcard(flashcard[1], flashcard[2], topic_id)
 
 
-def delete_community_subject(subject_id):
+def delete_community_subject(subject_id, username):
+    '''deletes a community subject only if `username` uploaded it; returns True if deleted'''
     conn = database()
     cursor = conn.cursor()
     
     cursor.execute(''' delete from communitysubjects
-                       where community_subject_id = %s''', (subject_id,))
+                       where community_subject_id = %s and uploader_username = %s''', (subject_id, username))
+    deleted = cursor.rowcount > 0
     conn.commit()
     conn.close()
+    return deleted
 
-def delete_community_topic(topic_id):
+def delete_community_topic(topic_id, username):
+    '''deletes a community topic only if `username` uploaded it; returns True if deleted'''
     conn = database()
     cursor = conn.cursor()
     
     cursor.execute(''' delete from communitytopics
-                       where community_topic_id = %s''', (topic_id,))
+                       where community_topic_id = %s and uploader_username = %s''', (topic_id, username))
+    deleted = cursor.rowcount > 0
     conn.commit()
     conn.close()
+    return deleted
 
 def check_community_subject_exists(username, subject_name):
     conn = database()
@@ -542,7 +602,6 @@ def add_points_db(username, quantity):
     conn.close()
 
     user_guild = get_user_guild(username)
-    print(user_guild)
     if user_guild:
         conn = database()
         cursor = conn.cursor()
@@ -602,7 +661,8 @@ def join_guild(username, guild_name, user_role):
     cursor = conn.cursor()
     
     cursor.execute('''update guilds
-                      set no_of_members = no_of_members + 1''')
+                      set no_of_members = no_of_members + 1
+                      where guild_name = %s''', (guild_name,))
     conn.commit()
     conn.close()
 
@@ -718,7 +778,6 @@ def get_intra_leaderboard(guild_name):
                     where guild_name = %s
                    order by points desc''', (guild_name,))
     leaderboard = cursor.fetchall()
-    print(leaderboard)
     conn.close()
     return leaderboard
 
@@ -733,26 +792,53 @@ def get_inter_leaderboard():
     return leaderboard
 
 def points_reset():
-    conn = database()
-    cursor = conn.cursor()
-    
-    cursor.execute('''select last_reset from pointsreset''')
-    last_reset = cursor.fetchone()[0]
+    '''
+    resets everyone's weekly points once per week (Monday 00:00 UTC), on the first request
+    after the deadline.
 
-
+    previously this opened a second connection inside the first and only closed one, leaking a
+    database connection on every guild page view. it now uses one connection, and the
+    pointsreset row is claimed with a conditional UPDATE, so if two requests race past the
+    deadline exactly one of them performs the reset.
+    '''
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     monday = now - timedelta(days=now.weekday())
     monday_midnight = monday.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    if last_reset < str(monday_midnight):
-        conn = database()
+    conn = database()
+    try:
         cursor = conn.cursor()
-        
-        cursor.execute('update students set points = 0')
-        cursor.execute('update guilds set points = 0')               
-        cursor.execute('update pointsreset set last_reset = %s', (now,))
+        cursor.execute('''update pointsreset set last_reset = %s
+                          where last_reset < %s''', (str(now), str(monday_midnight)))
+        if cursor.rowcount > 0:
+            cursor.execute('update students set points = 0')
+            cursor.execute('update guilds set points = 0')
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def get_guild(guild_name):
+    '''returns (guild_name, leader_username, points, no_of_members) or None'''
+    conn = database()
+    cursor = conn.cursor()
+    cursor.execute('select guild_name, leader_username, points, no_of_members from guilds where guild_name = %s',
+                   (guild_name,))
+    guild = cursor.fetchone()
     conn.close()
+    return guild
+
+def has_pending_request(username, guild_name):
+    conn = database()
+    cursor = conn.cursor()
+    cursor.execute('''select 1 from guildrequests
+                      where request_username = %s and guild_name = %s and status = 'pending' ''',
+                   (username, guild_name))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
 
 def guild_exists(guild_name):
     conn = database()
@@ -814,6 +900,39 @@ def add_purchase(item_id, username):
                    values (%s, %s)''', (username, item_id))
     conn.commit()
     conn.close()
+
+def purchase_item(username, item_id):
+    '''
+    buys an item in one transaction. returns "ok", "owned", "insufficient" or "missing".
+
+    previously the route deducted coins first and then inserted the purchase in a separate
+    connection, so buying an item you already owned took the coins and then raised a primary
+    key violation (500). two concurrent purchases could also both pass the balance check.
+    '''
+    conn = database()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('select price from shopitems where item_id = %s', (item_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return "missing"
+        price = row[0]
+        cursor.execute('select 1 from purchases where username = %s and item_id = %s', (username, item_id))
+        if cursor.fetchone():
+            return "owned"
+        cursor.execute('''update students set coins = coins - %s
+                          where username = %s and coins >= %s''', (price, username, price))
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return "insufficient"
+        cursor.execute('insert into purchases(username, item_id) values (%s, %s)', (username, item_id))
+        conn.commit()
+        return "ok"
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def get_item_details(item_id):
     conn = database()

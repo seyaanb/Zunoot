@@ -1,8 +1,9 @@
-from flask import render_template, redirect, url_for, flash, request, current_app
+from flask import render_template, redirect, url_for, flash, request, current_app, session
 from flask_login import login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import backend.queries as q
 import backend.user as u
+from blueprints.ops import PUBLIC_ENDPOINTS
 import re
 
 from . import auth_bp
@@ -21,7 +22,7 @@ def require_login():
     '''
     ensures that users cannot access most endpoints without being logged in
     '''
-    exempt_endpoints = ["auth.index", "auth.login", "auth.register", "home"]
+    exempt_endpoints = ["auth.index", "auth.login", "auth.register", "home", *PUBLIC_ENDPOINTS]
     if request.endpoint in exempt_endpoints or request.endpoint == "static":
         return
 
@@ -101,6 +102,8 @@ def login():
             user = get_user(username)
 
             if user and check_password_hash(user.get_password_hash(), password):
+                # never carry a review queue across accounts on a shared browser
+                session.pop("queue", None)
                 login_user(user)
                 flash("You're logged in!")
                 return redirect(url_for("library.library"))
@@ -121,22 +124,29 @@ def logout():
     user is logged out of their account and taken back to the landing page
     '''
     try:
+        session.pop("queue", None)
         logout_user()
-    except:
+    except Exception:
+        current_app.logger.exception("Logout failed")
         flash("Whoops, something went wrong. Please try again")
     else:
         flash("You're logged out")
 
     return redirect(url_for("auth.index"))
 
-@auth_bp.route("/delete-account")
+@auth_bp.route("/delete-account", methods=["POST"])
 def delete_account():
     '''
-    deletes a user's account and any linked database items, such as subjects or purchases
+    deletes a user's account and any linked database items, such as subjects or purchases.
+
+    POST-only (CSRF-protected): as a GET, any page or image tag pointing at this URL could
+    delete the account of a logged-in visitor.
     '''
 
     username = current_user.id
     q.delete_user(username)
+    session.pop("queue", None)
+    logout_user()
 
     return redirect(url_for("home"))
 

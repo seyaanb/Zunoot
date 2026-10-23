@@ -26,15 +26,19 @@ def shop():
 def purchase(item_id):
     '''
     allows a user to trade coins they have for an avatar or app theme
+
+    the balance check, deduction and purchase now happen in one transaction
+    (queries.purchase_item). previously buying an item you already owned took the coins and
+    then failed with a 500, and an unknown item_id was a 500.
     '''
-    username = current_user.id 
+    result = q.purchase_item(current_user.id, item_id)
 
-    item_price = q.get_item_price(item_id)[0]
-
-    if item_price <= current_user.get_coins():
-        current_user.deduct_coins(item_price)
-        q.add_purchase(item_id, username)
+    if result == "ok":
         flash("Purchase successful!", "success")
+    elif result == "owned":
+        flash("You already own this!", "error")
+    elif result == "missing":
+        flash("That item doesn't exist", "error")
     else:
         flash("Not enough coins!", "error")
     
@@ -46,6 +50,9 @@ def equip(item_id):
     allows a user to equip an avatar or app theme
     '''
     item_details = q.get_item_details(item_id)
+    if item_details is None:
+        flash("That item doesn't exist")
+        return redirect(url_for("shop.shop"))
     item_type = item_details[2]
     item_name = item_details[1]
 
@@ -55,6 +62,7 @@ def equip(item_id):
             q.equip_avatar(current_user.id, item_name)
         elif item_type == "theme":
             q.equip_theme(current_user.id, item_name)
-    
-    flash(f"{item_name.capitalize()} has been equipped")    
+        flash(f"{item_name.capitalize()} has been equipped")
+    else:
+        flash("You need to buy this first")
     return redirect(url_for("shop.shop", item_type=item_type))

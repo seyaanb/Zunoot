@@ -1,7 +1,8 @@
-from flask import session, render_template, redirect, url_for, flash, request, jsonify
+from flask import session, render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import current_user
 import backend.queries as q
 import backend.flashcard_library.library as l
+from backend.session_queue import SessionQueue
 from . import library_bp
 
 @library_bp.route("/", methods=["GET", "POST"])
@@ -30,7 +31,8 @@ def library():
                                             coins=current_user.get_coins(),
                                             avatar=current_user.get_avatar(),
                                             theme=current_user.get_theme())
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.library failed")
         flash("We struggled to load your library. Please try again")
         return redirect(url_for("auth.index"))
 
@@ -63,7 +65,8 @@ def subject(subject_name):
                                             coins=current_user.get_coins(),
                                             avatar=current_user.get_avatar(),
                                             theme=current_user.get_theme())
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.subject failed")
         flash("We struggled to load this subject. Please try again")
         return redirect(url_for("library.library"))
 
@@ -86,13 +89,15 @@ def topic(subject_name, topic_name):
             return redirect(url_for("library.subject", subject_name=subject_name))
         
         if request.method == "POST":
-            current_user.add_coins(10)
-            if current_user.get_guild():
-                current_user.add_points(5)
             flashcard_front = request.form.get("new-flashcard-front")
             flashcard_back = request.form.get("new-flashcard-back") 
             if flashcard_front and flashcard_back and not flashcard_front.isspace() and not flashcard_back.isspace():
                 topic_node.addChild(flashcard_front, flashcard_back)
+                # rewards are given only once a card has actually been created. they used to be
+                # given for any POST, so submitting an empty form repeatedly farmed coins/points.
+                current_user.add_coins(10)
+                if current_user.get_guild():
+                    current_user.add_points(5)
                 return redirect(url_for("library.topic", subject_name=subject_node.getName(), topic_name=topic_node.getName()))
 
         flashcards = topic_node.getChildren()
@@ -103,7 +108,8 @@ def topic(subject_name, topic_name):
                                             coins=current_user.get_coins(),
                                             avatar=current_user.get_avatar(),
                                             theme=current_user.get_theme())
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.topic failed")
         flash("We struggled to load this topic. Please try again")
         return redirect(url_for("library.subject", subject_name=subject_name))
 
@@ -126,7 +132,8 @@ def search_library():
                                                     coins=current_user.get_coins(),
                                                     avatar=current_user.get_avatar(),
                                                     theme=current_user.get_theme())
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.search_library failed")
         flash("We struggled to load the search results. Please try again")
         return redirect(url_for("library.library"))
     
@@ -147,7 +154,8 @@ def edit_subject():
                 subject_node.editName(new_name)
 
         return redirect(url_for("library.library"))
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.edit_subject failed")
         flash("Something went wrong. Please try again")
         return redirect(url_for("library.library"))
 
@@ -159,20 +167,28 @@ def edit_topic():
     try:
         old_name = request.form.get("old-topic-name")
         new_name = request.form.get("new-topic-name")
+        topic_id = request.form.get("topic-id")
 
         if new_name and old_name != new_name:
             current_library = l.Library(current_user.id)
             current_library.initialiseLibrary(current_user.id)
             
-            # Find the topic anywhere in the library and update it
+            # Find the topic in the user's library and update it. Match on ID: matching on
+            # name renamed the first topic with that name in *any* subject (e.g. every
+            # subject's "Chapter 1"). Name matching remains only as a fallback for pages
+            # rendered before this change.
             for sub in current_library.getChildren():
-                topic_node = sub.getChildByName(old_name)
+                if topic_id:
+                    topic_node = next((t for t in sub.getChildren() if str(t.topic_id) == topic_id), None)
+                else:
+                    topic_node = sub.getChildByName(old_name)
                 if topic_node:
                     topic_node.editName(new_name)
                     return redirect(url_for("library.subject", subject_name=sub.getName()))
         
         return redirect(url_for("library.library"))
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.edit_topic failed")
         flash("Something went wrong. Please try again")
         return redirect(url_for("library.library"))
 
@@ -185,21 +201,28 @@ def edit_flashcard():
         old_front = request.form.get("old-flashcard-front")
         new_front = request.form.get("new-flashcard-front")
         new_back = request.form.get("new-flashcard-back")
+        flashcard_id = request.form.get("flashcard-id")
 
         if new_front and new_back:
             current_library = l.Library(current_user.id)
             current_library.initialiseLibrary(current_user.id)
             
-            # Find the flashcard anywhere in the library and update it
+            # Find the flashcard in the user's library by ID (matching on front text edited
+            # the first card with that text anywhere in the library); name is a fallback only.
             for sub in current_library.getChildren():
                 for top in sub.getChildren():
-                    flashcard_node = top.getChildByName(old_front)
+                    if flashcard_id:
+                        flashcard_node = next((c for c in top.getChildren()
+                                               if str(c.flashcard_id) == flashcard_id), None)
+                    else:
+                        flashcard_node = top.getChildByName(old_front)
                     if flashcard_node:
                         flashcard_node.editFlashcard(new_front, new_back)
                         return redirect(url_for("library.topic", subject_name=sub.getName(), topic_name=top.getName()))
         
         return redirect(url_for("library.library"))
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.edit_flashcard failed")
         flash("Something went wrong. Please try again")
         return redirect(url_for("library.library"))
     
@@ -240,7 +263,8 @@ def delete():
                             return redirect(url_for("library.topic", subject_name=sub.getName(), topic_name=top.getName()))
                             
         return redirect(url_for("library.library"))
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.delete failed")
         flash("We couldn't delete the item. Please try again")
         return redirect(url_for("library.library"))
     
@@ -249,9 +273,15 @@ def update_order(itemType):
     '''
     updates the order in which subjects/topics/flashcards are displayed on the screen
     '''
-    order = request.json.get("order")
-    q.update_order(itemType, order)
-    return jsonify({"status": "success"}) 
+    payload = request.get_json(silent=True) or {}
+    order = payload.get("order")
+    if itemType not in ("Subject", "Topic", "Flashcard") or not isinstance(order, list):
+        return jsonify({"status": "error"}), 400
+    try:
+        q.update_order(itemType, order, current_user.id)
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"status": "error"}), 400
+    return jsonify({"status": "success"})
 
 @library_bp.route('/review', methods=["GET", "POST"])
 def review_page():
@@ -265,18 +295,21 @@ def review_page():
         if "queue" not in session:
             current_library = l.Library(current_user.id)
             current_library.initialiseLibrary(current_user.id)
-            
-            if spaced_repetition == "true":
-                session["queue"] = current_library.makeSessionQueue(True)
-            else:
-                session["queue"] = current_library.makeSessionQueue(False)
+            queue = current_library.makeSessionQueue(spaced_repetition == "true")
+        else:
+            queue = SessionQueue.from_dict(session["queue"])
 
-        next_flashcard = session["queue"].getNextFlashcard()
+        next_flashcard = queue.getNextFlashcard()
+        # the session stores plain data only (see SessionQueue.to_dict); reassigning also
+        # marks the session as modified so the advanced pointer is saved.
+        session["queue"] = queue.to_dict()
 
-        if next_flashcard:
+        card_text = q.get_flashcard_text(next_flashcard.flashcard_id, current_user.id) if next_flashcard else None
+
+        if card_text:
             return render_template("review.html", title="Review Flashcards",
-                                                front=next_flashcard.getName(),
-                                                back=next_flashcard.getBack(),
+                                                front=card_text[0],
+                                                back=card_text[1],
                                                 hidden="",
                                                 avatar=current_user.get_avatar(),
                                                 coins=current_user.get_coins(),
@@ -289,7 +322,8 @@ def review_page():
                                             avatar=current_user.get_avatar(),
                                             coins=current_user.get_coins(),
                                             theme=current_user.get_theme())
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.review_page failed")
         flash("Something went wrong. Please try again")
         return redirect(url_for('library.library'))
 
@@ -300,16 +334,21 @@ def spaced_repetition():
     uses this input in the SM2 spaced repetition algorithm to update the priority queue
     '''
     try:
-        option = request.form.get("option")
-        current_flashcard = session["queue"].getCurrentFlashcard()
+        option = int(request.form.get("option"))
+        if not 0 <= option <= 5:
+            raise ValueError("rating must be between 0 and 5")
+        queue = SessionQueue.from_dict(session["queue"])
+        current_flashcard = queue.getCurrentFlashcard()
         current_flashcard.reviewFlashcard(option)
+        session["queue"] = queue.to_dict()
 
         current_user.add_coins(2)
         if current_user.get_guild():
             current_user.add_points(1)
 
         return redirect(url_for("library.review_page"))
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.spaced_repetition failed")
         flash("Something went wrong. Please try again")
         return redirect(url_for("library.review_page"))
 
@@ -321,12 +360,13 @@ def end_session():
     '''
     try:
         if "queue" in session:
-            if session["queue"].spaced_repetition:
-                deck = session["queue"].items
-                q.push_deck(deck)
+            queue = SessionQueue.from_dict(session["queue"])
+            if queue.spaced_repetition:
+                q.push_deck(queue.items, current_user.id)
             session.pop("queue", None)
         flash("Your session has been ended")
         return redirect(url_for("library.library"))
-    except Exception as e:
+    except Exception:
+        current_app.logger.exception("library.end_session failed")
         flash("We couldn't end your session.")
         return redirect(url_for("library.library"))

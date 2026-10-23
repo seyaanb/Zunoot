@@ -27,13 +27,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const requestsHeading = document.getElementById("requestsHeading");
     const requestsList = document.querySelector(".requests-list");
 
-    requestsHeading.addEventListener("click", () => {
-        if (requestsList.style.display === "none") {
-            requestsList.style.display = "block";
-        } else {
-            requestsList.style.display = "none";
-        }
-    });
+    /* only the guild page has a requests tab; without this guard every other
+       page threw "Cannot read properties of null" here */
+    if (requestsHeading && requestsList) {
+        requestsHeading.addEventListener("click", () => {
+            if (requestsList.style.display === "none") {
+                requestsList.style.display = "block";
+            } else {
+                requestsList.style.display = "none";
+            }
+        });
+    }
 });
 
 

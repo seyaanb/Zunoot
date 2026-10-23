@@ -1,0 +1,58 @@
+# Render configuration for Zunoot, kept in the repo as the reviewed source of
+# truth for how the services should be set up.
+#
+# READ BEFORE USING AS A BLUEPRINT. The production service `zunoot` was created
+# in the dashboard. If you create a *new* Blueprint from this file, Render will
+# not take over that service; it creates a second one with a suffixed name.
+# The safe migration is the dashboard path in SETUP_CHECKLIST.md, section 2,
+# which edits the existing service in place and keeps its URL
+# (zunoot.onrender.com, where users have the PWA installed) and its env vars.
+# Once the dashboard matches this file, you can optionally adopt both services
+# into a Blueprint (SETUP_CHECKLIST.md, section 2.6).
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: zunoot
+    runtime: docker
+    plan: free                    # match your current plan
+    # region: frankfurt           # must match the existing service (can't change after creation)
+    branch: main
+    dockerfilePath: ./Dockerfile
+    # Deploy only after GitHub Actions (.github/workflows/ci.yml) passes on the
+    # merged commit. A red build never reaches users.
+    autoDeployTrigger: checksPass
+    # Liveness, not readiness: Render polls this every few seconds and restarts
+    # instances that fail it. It deliberately doesn't touch the database (see
+    # OPS_NOTES.md, "Why Render checks /livez and not /healthz").
+    healthCheckPath: /livez
+    envVars:
+      - key: DATABASE_URL         # Neon production branch (pooled connection string)
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: GUNICORN_THREADS
+        value: "4"
+
+  # Staging: same image, its own Neon branch. Used for load tests and for trying
+  # risky changes on production-shaped data without touching production.
+  - type: web
+    name: zunoot-staging
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile
+    autoDeployTrigger: checksPass
+    healthCheckPath: /livez
+    envVars:
+      - key: DATABASE_URL         # Neon *staging* branch, never the production one
+        sync: false
+      - key: SECRET_KEY           # different from production
+        sync: false
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: GUNICORN_THREADS
+        value: "4"

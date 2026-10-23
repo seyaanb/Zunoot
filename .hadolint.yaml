@@ -1,0 +1,5 @@
+# DL3008 (pin apt package versions): deliberately ignored. Debian mirrors drop
+# superseded package versions, so exact pins break rebuilds without warning.
+# The base image tag pins the distro release; tini is the only package.
+ignored:
+  - DL3008

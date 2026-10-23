@@ -1,0 +1,109 @@
+# Nightly encrypted, restore-tested backup of the production database.
+#
+# Why GitHub Actions rather than a Render cron job: Render cron jobs have no
+# free tier, while scheduled Actions are free, keep secrets in GitHub, and keep
+# the logs of every run. Trade-offs (schedule delays, the 60-day inactivity
+# rule) are covered in OPS_NOTES.md.
+#
+# Each run: pg_dump -> test-restore into a throwaway Postgres -> age-encrypt ->
+# upload to S3-compatible storage (daily/, plus monthly/ on the 1st). Retention
+# is enforced by bucket lifecycle rules, not by this job.
+#
+# Setup: SETUP_CHECKLIST.md section 5. Secrets live in the "backups" GitHub
+# Environment, so only workflows on main can read them.
+
+name: Nightly backup
+
+on:
+  schedule:
+    # 03:17 UTC daily. Not on the hour: GitHub delays top-of-the-hour schedules
+    # under load. The time is quiet for UK students.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: backups
+    services:
+      # Throwaway database for the test restore. It must be at least as new as
+      # production's Postgres major version.
+      verify:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: verify
+          POSTGRES_PASSWORD: verify
+          POSTGRES_DB: verify
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U verify"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      HC_URL: ${{ secrets.HEALTHCHECKS_BACKUP_URL }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Signal start (dead man's switch)
+        if: env.HC_URL != ''
+        run: curl -fsS -m 10 --retry 3 "${HC_URL}/start" >/dev/null || true
+
+      - name: Install PostgreSQL 18 client and age
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common age
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Back up, test-restore, encrypt, upload
+        env:
+          SOURCE_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          VERIFY_DATABASE_URL: postgresql://verify:verify@localhost:5433/verify
+          AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+          S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
+          S3_ENDPOINT_URL: ${{ vars.BACKUP_S3_ENDPOINT_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.BACKUP_S3_REGION || 'auto' }}
+          OUTPUT_DIR: ${{ runner.temp }}/backup-out
+        run: |
+          [ -n "$SOURCE_DATABASE_URL" ] || { echo "::error::BACKUP_DATABASE_URL secret is not set"; exit 1; }
+          [ -n "$S3_BUCKET" ] || { echo "::error::BACKUP_S3_BUCKET variable is not set"; exit 1; }
+          if [ "$(date -u +%d)" = "01" ]; then export MONTHLY=1; fi
+          manifest="$(scripts/backup/backup.sh)"
+          # Job summary: what was backed up, how big, how long the test restore took.
+          python3 - "$manifest" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1]))
+          print(f"### Backup {m['name']}\n")
+          print(f"- object: `{m['object_key']}` ({m['encrypted_bytes']/1024:.0f} KiB encrypted)")
+          print(f"- source Postgres {m['source_server_version']}, pg_dump {m['pg_dump_version']}")
+          print(f"- dump {m['dump_seconds']} s, verified by test restore in {m['verify_restore_seconds']} s\n")
+          print("| table | rows |\n|---|---|")
+          for t, n in m["row_counts"].items():
+              print(f"| {t} | {n} |")
+          PY
+          cp "$manifest" "${{ runner.temp }}/manifest.json"
+
+      # The manifest has row counts and checksums only, no user data.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: backup-manifest
+          path: ${{ runner.temp }}/manifest.json
+          retention-days: 30
+
+      - name: Signal success
+        if: success() && env.HC_URL != ''
+        run: curl -fsS -m 10 --retry 3 "${HC_URL}" >/dev/null
+
+      - name: Signal failure
+        if: failure() && env.HC_URL != ''
+        run: curl -fsS -m 10 --retry 3 "${HC_URL}/fail" >/dev/null || true

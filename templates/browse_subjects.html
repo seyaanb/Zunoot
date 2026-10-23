@@ -21,7 +21,8 @@
                     <li class="creator-name"><u>{{ subject[2] }}</u></li>
                 </ul>
                 {% if user == subject[2] %}
-                    <form action="{{ url_for('community.delete_community_subject') }}" class="delete-community-form">
+                    <form action="{{ url_for('community.delete_community_subject') }}" class="delete-community-form" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="hidden" name="subject_id" value="{{ subject[0] }}">
                         <button class="delete-community-subject">Delete</button>
                     </form>

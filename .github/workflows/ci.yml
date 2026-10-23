@@ -1,0 +1,223 @@
+# CI: lint, tests against real Postgres, and a production-image boot test.
+#
+# Runs on every PR and on every push to main. Render's "Auto-Deploy: After CI
+# Checks Pass" deploys a commit on main only if every check reported for that
+# commit has passed, so this workflow is the deploy gate.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel superseded runs on PR branches; never cancel a run on main, because
+  # Render waits for its result before deploying.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      # Whole repo: rules that catch crashes (syntax errors, undefined names).
+      - name: ruff (whole repo, crash-class rules)
+        run: ruff check --output-format=github .
+      - name: Grafana dashboard JSON is up to date with its generator
+        run: |
+          python ops/grafana/build_dashboard.py
+          git diff --exit-code ops/grafana/zunoot-overview.json
+      # New infrastructure code is held to the full rule set. Older app code
+      # joins this list file by file (a lint "ratchet").
+      - name: ruff (strict, infrastructure code)
+        run: >
+          ruff check --output-format=github --select E,F,W,B
+          blueprints/ops tests gunicorn.conf.py observability ops loadtest
+
+  lint-infra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: hadolint (Dockerfile)
+        run: docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" hadolint/hadolint:v2.15.1 < Dockerfile
+      - name: shellcheck (backup scripts)
+        run: shellcheck scripts/backup/*.sh
+      - name: actionlint (GitHub workflows)
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
+  # SLO recording rules and alerts: syntax check plus unit tests that prove
+  # each alert fires (or stays quiet) on synthetic series.
+  alert-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: promtool check + test
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            check rules ops/prometheus/rules/zunoot-slo.yml
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            test rules ops/prometheus/tests/slo_test.yml
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.1 \
+            check config ops/prometheus/prometheus.local.yml
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zunoot_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/zunoot_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest --junitxml=pytest-report.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pytest-report
+          path: pytest-report.xml
+
+  # The backup and restore scripts, end to end on every PR: dump -> test
+  # restore -> encrypt -> restore from the encrypted file -> row counts match.
+  # Also proves restore.sh refuses a non-empty target.
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: source
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      PG: postgresql://postgres:postgres@localhost:5432
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -q && sudo apt-get install -y -q age postgresql-client
+      - name: Seed a source database
+        run: |
+          psql "$PG/source" -v ON_ERROR_STOP=1 -q -f db/schema.sql -f db/seed_dev.sql
+          psql "$PG/source" -v ON_ERROR_STOP=1 -q <<'SQL'
+          insert into students(username, first_name, last_name, password, email_address) values ('ci','c','i','x','ci@e.com');
+          insert into purchases values ('ci', 1), ('ci', 13);
+          insert into subjects(subject_name, username) values ('S', 'ci');
+          insert into topics(topic_name, subject_id) values ('T', 1);
+          insert into flashcards(front, back, topic_id) select 'q' || g, 'a', 1 from generate_series(1, 50) g;
+          SQL
+          psql "$PG/source" -c "create database verify" -c "create database restored"
+      - name: Back up (local output, no S3)
+        run: |
+          age-keygen -o key.txt
+          SOURCE_DATABASE_URL="$PG/source" VERIFY_DATABASE_URL="$PG/verify" \
+          AGE_RECIPIENT="$(age-keygen -y key.txt)" OUTPUT_DIR=out scripts/backup/backup.sh
+      - name: Restore from the encrypted file and verify
+        run: |
+          ZUNOOT_PROD_HOST=prod.invalid scripts/backup/restore.sh out/*.dump.age \
+            --target "$PG/restored" --identity key.txt --yes
+          test "$(psql "$PG/restored" -XAtc 'select count(*) from flashcards')" = 50
+      - name: Restore must refuse a non-empty target
+        run: |
+          if ZUNOOT_PROD_HOST=prod.invalid scripts/backup/restore.sh out/*.dump.age \
+               --target "$PG/restored" --identity key.txt --yes; then
+            echo "::error::restore.sh overwrote a non-empty database"; exit 1
+          fi
+
+  # Build the exact image Render will build, start it against a throwaway
+  # Postgres, and check it boots, answers health checks and runs as non-root.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zunoot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: zunoot:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Load schema into the throwaway database
+        run: psql "postgresql://postgres:postgres@localhost:5432/zunoot" -v ON_ERROR_STOP=1 -f db/schema.sql -f db/seed_dev.sql
+      - name: Image runs as a non-root user
+        run: test "$(docker run --rm --entrypoint id zunoot:ci -u)" != "0"
+      - name: Boot the container and probe it
+        run: |
+          docker run -d --name app --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/zunoot \
+            -e SECRET_KEY=ci-only-secret -e PORT=10000 zunoot:ci
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:10000/livez && break
+            sleep 1
+          done
+          curl -fsS http://localhost:10000/healthz | tee /dev/stderr | grep -q '"status":"ok"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:10000/auth/)" = "200"
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: "2.3.0"
+      # End-to-end user flow against the production image: register, build a
+      # small library, review cards, end the session, delete the account.
+      - name: k6 smoke test (main user flow)
+        run: |
+          k6 run -q -e BASE_URL=http://localhost:10000 -e PROFILE=smoke \
+            -e LOADTEST_USERS=1 -e SUBJECTS=1 -e TOPICS=2 -e CARDS=3 -e RUN_ID=ci \
+            -e SUMMARY_FILE=k6-smoke.json loadtest/zunoot.js
+      - name: Container logs
+        if: always()
+        run: docker logs app || true
+      - name: Report image size
+        run: |
+          docker image inspect zunoot:ci --format '{{.Size}}' | awk '{printf "image size: %.0f MB\n", $1/1000/1000}'

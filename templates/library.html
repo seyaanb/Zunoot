@@ -57,6 +57,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="text" id="newTopicName" name="new-topic-name" value="{{ topic.getName() }}" autofocus>
                         <input type="hidden" id="oldTopicName" name="old-topic-name" value="{{ topic.getName() }}">
+                        <input type="hidden" name="topic-id" value="{{ topic.topic_id }}">
                     </form>
                     <div class="options-menu">
                         <button class="edit-button">Edit</button>
@@ -68,6 +69,7 @@
                         </form>
                         <form action="{{ url_for('community.upload_topic') }}" method="post">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <input type="hidden" name="subject" value="{{ current_subject.getName() }}">
                             <input type="hidden" name="name" value="{{ topic.getName() }}">
                             <button type="submit" class="upload-button">Upload to community</button>
                         </form>
@@ -89,6 +91,7 @@
                         <input type="text" id="newFlashcardFront" name="new-flashcard-front" value="{{ flashcard.getName() }}" autofocus>
                         <input type="text" id="newFlashcardBack" name="new-flashcard-back" value="{{ flashcard.getBack() }}">
                         <input type="hidden" id="oldFlashcardFront" name="old-flashcard-front" value="{{ flashcard.getName() }}">
+                        <input type="hidden" name="flashcard-id" value="{{ flashcard.flashcard_id }}">
                     </form>
                     <div class="options-menu" id="optionsMenu">
                         <button class="reveal-flashcard" id="revealFlashcard">Show Answer</button>
