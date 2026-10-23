@@ -1,9 +1,17 @@
 # Bug fixes — October 2026
 
-Found while building the test suite and observability for Zunoot. Each bug has a regression test in
-`tests/test_bugfixes.py`, named `test_bugN_...`. Every regression test was checked to **fail against the
-code before the fix** and pass after. The two exceptions are positive-control tests ("the owner can still
-do X"), which pass on both.
+Found while building the test suite and observability for Zunoot.
+
+**Test coverage:**
+- **BUG-1 to BUG-12 and BUG-16** (13 of the 16) have regression tests in `tests/test_bugfixes.py`. They're
+  named `test_bugN_...`, except BUG-12's, which is `test_rating_must_be_between_0_and_5`. BUG-1 also has
+  end-to-end review tests in `tests/test_smoke.py`.
+- Those 32 tests were run against the code before the fixes, and **31 of them fail there**. The one that
+  passes on both is `test_bug5a_owner_can_still_reorder`, a positive control: it checks that an owner can
+  still reorder their own items, so it is meant to pass either way.
+- **BUG-13** (exceptions not logged) is exercised by `test_handled_exception_counts_as_failed_request` in
+  `tests/test_observability.py`.
+- **BUG-14** (a JavaScript error) and **BUG-15** (stray `print` calls) have no automated test.
 
 | # | Severity | Area | Summary |
 |---|----------|------|---------|

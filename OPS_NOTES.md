@@ -44,8 +44,8 @@ the main latency bottleneck."
 
 ## 1. The test suite and the bugs it found
 
-**What:** `pytest` against a **real Postgres** (not SQLite, not mocks), 70+ tests: smoke tests, one
-regression test per bug (`tests/test_bugfixes.py`), observability tests. The suite refuses to run against
+**What:** `pytest` against a **real Postgres** (not SQLite, not mocks), 70+ tests: smoke tests,
+regression tests for 13 of the 16 bugs (`tests/test_bugfixes.py`), observability tests. The suite refuses to run against
 any database that isn't local and named `*_test`, because it drops the schema.
 
 **Why real Postgres:** the app uses raw SQL through psycopg2. Mocks would only test that I called the mock.
@@ -59,8 +59,9 @@ And most routes catch errors and redirect, so nothing obvious showed up anywhere
 
 **Interview questions**
 
-- *How do you know your regression tests actually test the bug?* I ran each one against the pre-fix code,
-  and all but the positive-control tests failed. One test passed on the old code for the wrong reason: the
+- *How do you know your regression tests actually test the bug?* I ran all 32 against the pre-fix code,
+  and 31 failed. The one that passed is a positive control (the owner can still reorder their own items),
+  which is meant to pass on both. In an earlier check, one test had passed on the old code for the wrong reason: the
   old route rejected the method I used, so the authorisation check never ran. I rewrote it to try both GET
   and POST. A test that can't fail is worse than no test, because it gives false confidence.
 - *Why didn't monitoring catch BUG-1?* There wasn't any. But the deeper lesson is that even status-code
