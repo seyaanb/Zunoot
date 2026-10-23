@@ -6,11 +6,13 @@
     <div class="guild-header">
         <h1 class="guild-name">{{ guild }}</h1>
         {% if role == "leader" %}
-        <form action="{{ url_for('guild.delete_guild')}}">
+        <form action="{{ url_for('guild.delete_guild')}}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <button type="submit">Delete Guild</button>
         </form>
         {% else %}
-        <form action="{{ url_for('guild.leave_guild')}}">
+        <form action="{{ url_for('guild.leave_guild')}}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <button type="submit">Leave Guild</button>
         </form>
         {% endif %}
@@ -66,7 +68,8 @@
 
 
     <button id="createGuildButton" class="create-guild-button" type="button">Create Guild</button>
-    <form action="{{ url_for('guild.create_guild')}}" id="createGuildForm" class="create-guild-form">
+    <form action="{{ url_for('guild.create_guild')}}" id="createGuildForm" class="create-guild-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="text" name="guild_name" placeholder="Guild Name">
         <input type="submit" value="Submit">
     </form>
@@ -80,7 +83,8 @@
                     <p>Leader: {{ guild[1] }}</p>
                     <p>{{ guild[2] }} points</p>
                     <p>{{ guild[3] }}/50 members</p>
-                    <form action="{{ url_for('guild.join_guild', guild_name=guild[0]) }}">
+                    <form action="{{ url_for('guild.join_guild', guild_name=guild[0]) }}" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="submit" value="Request">
                     </form>
                 </ul>

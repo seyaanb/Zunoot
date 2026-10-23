@@ -33,13 +33,21 @@ def guild():
                                         theme=current_user.get_theme())
 
 
-@guild_bp.route("/create-guild")
+MAX_GUILD_MEMBERS = 50
+
+# All state-changing guild actions are POST-only so they are covered by CSRF
+# protection. As GETs, a link or <img> on any website could make a logged-in
+# user create, join, leave or delete a guild.
+
+@guild_bp.route("/create-guild", methods=["POST"])
 def create_guild():
     '''
     takes the name of the guild as input and creates a guild, making the user who created it the leader
     '''
-    guild_name = request.args.get("guild_name")
-    if guild_name and not q.guild_exists(guild_name) and not guild_name.isspace():
+    guild_name = request.form.get("guild_name")
+    if current_user.get_guild():
+        flash("Leave your current guild before creating a new one")
+    elif guild_name and not guild_name.isspace() and not q.guild_exists(guild_name):
         q.create_guild(guild_name, current_user.id)
         q.join_guild(current_user.id, guild_name, "leader")
         q.delete_user_requests(current_user.id)
@@ -48,12 +56,12 @@ def create_guild():
 
     return redirect(url_for("guild.guild"))
 
-@guild_bp.route("/join-guild/<guild_name>")
+@guild_bp.route("/join-guild/<guild_name>", methods=["POST"])
 def join_guild(guild_name):
     '''
     allows a user to send a request to join a guild
     '''
-    if not q.get_user_requests(current_user.id):
+    if not current_user.get_guild() and q.guild_exists(guild_name) and not q.get_user_requests(current_user.id):
         q.request_guild(current_user.id, guild_name)
         flash(f"Request sent to {guild_name}")
         return redirect(url_for("guild.guild"))
@@ -61,13 +69,32 @@ def join_guild(guild_name):
     flash(f"Request to {guild_name} failed")
     return redirect(url_for("guild.guild"))
 
+def _is_leader_of(guild_name):
+    guild = q.get_guild(guild_name)
+    return guild is not None and guild[1] == current_user.id
+
 @guild_bp.route("/accept-request", methods=["POST"])
 def accept_request():
     '''
-    allows a leader to accept a user's request and makes the requesting user a member of the guild
+    allows a leader to accept a user's request and makes the requesting user a member of the guild.
+
+    previously any logged-in user could call this for any guild and any username, which let
+    them force-add arbitrary users to arbitrary guilds. it now requires the caller to lead the
+    guild, a pending request from that user, room in the guild, and the user not to be in a guild.
     '''
     username = request.form.get("username")
-    guild_name = request.form.get("guild_name")
+    guild_name = request.form.get("guild_name") or current_user.get_guild()
+
+    if not _is_leader_of(guild_name) or not q.has_pending_request(username, guild_name):
+        flash("You can't accept that request")
+        return redirect(url_for("guild.guild"))
+
+    guild = q.get_guild(guild_name)
+    requester_guild = q.get_user_guild(username)
+    if guild[3] >= MAX_GUILD_MEMBERS or (requester_guild and requester_guild[0]):
+        q.reject_guild_request(username, guild_name)
+        flash("That request can no longer be accepted")
+        return redirect(url_for("guild.guild"))
 
     q.accept_guild_request(username, guild_name)
 
@@ -81,27 +108,37 @@ def reject_request():
     allows a leader to reject a user's request to join
     '''
     username = request.form.get("username")
-    guild_name = request.form.get("guild_name")
+    guild_name = request.form.get("guild_name") or current_user.get_guild()
 
-    q.reject_guild_request(username, guild_name)
+    if _is_leader_of(guild_name):
+        q.reject_guild_request(username, guild_name)
 
     return redirect(url_for("guild.guild"))
 
-@guild_bp.route("/delete-guild")
+@guild_bp.route("/delete-guild", methods=["POST"])
 def delete_guild():
     '''
-    allows the leader of a guild to delete it
+    allows the leader of a guild to delete it (previously any member could)
     '''
-
-    q.delete_guild(current_user)
+    if current_user.get_guild() and current_user.get_guild_role() == "leader" \
+            and _is_leader_of(current_user.get_guild()):
+        q.delete_guild(current_user)
+    else:
+        flash("Only the guild leader can delete the guild")
 
     return redirect(url_for("guild.guild"))
 
-@guild_bp.route("/leave-guild")
+@guild_bp.route("/leave-guild", methods=["POST"])
 def leave_guild():
     '''
-    allows a member of a guild to leave it
+    allows a member of a guild to leave it. leaders delete the guild instead, which is what
+    the UI offers them; letting a leader leave would leave a guild nobody can manage.
     '''
-    q.leave_guild(current_user)
+    if not current_user.get_guild():
+        flash("You're not in a guild")
+    elif current_user.get_guild_role() == "leader":
+        flash("Leaders can't leave their guild. Delete it instead")
+    else:
+        q.leave_guild(current_user)
 
     return redirect(url_for("guild.guild"))

@@ -23,7 +23,7 @@ Each flashcard tracks `interval`, `repetition_no`, and `easiness_factor`, starti
  
 ### Review sessions
  
-A review session runs on a hand-rolled circular queue, front and rear pointers over a fixed list. Spaced mode only surfaces cards whose `next_review` date has passed, skipping past the rest. Unspaced mode goes through everything in the current subtree regardless of date. The Flask session stores the current card's front and back and whether it's spaced, nothing else. When the session ends, every reviewed card's updated SM-2 state gets written back to the database in one batch.
+A review session runs on a hand-rolled circular queue, front and rear pointers over a fixed list. Spaced mode only surfaces cards whose `next_review` date has passed, skipping past the rest. Unspaced mode goes through everything in the current subtree regardless of date. The Flask session stores only plain data: the queue pointers, whether it's spaced, and each card's ID and SM-2 state. Card text is read from the database (scoped to the logged-in user) when a card is shown. When the session ends, every reviewed card's updated SM-2 state gets written back to the database in one batch.
  
 ### Guilds and leaderboards
  
@@ -73,6 +73,10 @@ Migrating off SQLite was the bigger project. Rebuilt the schema in Postgres, seq
  
 Two SQLite database files with real usernames and password hashes from testing had been committed at some point. Deleting them wasn't enough since they were still in git history, so I ran `git filter-repo` and checked a fresh clone afterward to confirm they were actually gone.
  
+## Bugs fixed in October 2026
+
+Writing a proper test suite turned up sixteen bugs, including a crash on every review request, a query that overwrote other users' cards, and several missing authorisation checks. Each one is written up in [`docs/BUGFIXES.md`](docs/BUGFIXES.md) (symptom, root cause, fix, regression test), and `tests/test_bugfixes.py` has a test for each that fails against the old code.
+
 ## Known gaps
  
 The weekly points reset checks the `pointsreset` table against the current time on request rather than running on a schedule, so it only fires whenever the first request after Monday midnight happens to land. Email validation on registration checks the format with a regex, nothing confirms the address is real.

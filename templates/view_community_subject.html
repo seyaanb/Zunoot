@@ -3,7 +3,8 @@
 {% block main %}
 
 <h2>{{ subject_name }}</h2>
-<form action="{{ url_for('community.import_subject', subject_id=subject_id, subject_name=subject_name ) }}">
+<form action="{{ url_for('community.import_subject', subject_id=subject_id, subject_name=subject_name ) }}" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <button class="import">Import</button>
 </form>
 

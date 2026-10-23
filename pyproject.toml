@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+extend-exclude = ["venv"]
+
+[tool.ruff.lint]
+# Lint ratchet (see .github/workflows/ci.yml):
+#  - the whole repo is held to "will this crash?" rules: syntax errors,
+#    undefined names, invalid comparisons;
+#  - new infrastructure code is additionally checked with the full
+#    pyflakes + pycodestyle + bugbear set (`make lint` / CI "strict" step).
+# Older app code can be moved into the strict set file by file.
+select = ["E9", "F63", "F7", "F82"]
