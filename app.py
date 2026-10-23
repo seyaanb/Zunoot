@@ -9,6 +9,7 @@ from blueprints.library import library_bp
 from blueprints.community import community_bp
 from blueprints.guild import guild_bp
 from blueprints.shop import shop_bp
+from blueprints.ops import ops_bp
 from config import Config
 import backend.queries as q
 import backend.user as u
@@ -54,6 +55,7 @@ app.register_blueprint(library_bp, url_prefix="/library")
 app.register_blueprint(community_bp, url_prefix="/community")
 app.register_blueprint(guild_bp, url_prefix="/guild")
 app.register_blueprint(shop_bp, url_prefix="/shop")
+app.register_blueprint(ops_bp)
 
 #create a route to serve the service worker
 @app.route("/service-worker.js")

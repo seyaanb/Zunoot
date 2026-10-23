@@ -3,6 +3,7 @@ from flask_login import login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import backend.queries as q
 import backend.user as u
+from blueprints.ops import PUBLIC_ENDPOINTS
 import re
 
 from . import auth_bp
@@ -21,7 +22,7 @@ def require_login():
     '''
     ensures that users cannot access most endpoints without being logged in
     '''
-    exempt_endpoints = ["auth.index", "auth.login", "auth.register", "home"]
+    exempt_endpoints = ["auth.index", "auth.login", "auth.register", "home", *PUBLIC_ENDPOINTS]
     if request.endpoint in exempt_endpoints or request.endpoint == "static":
         return
 

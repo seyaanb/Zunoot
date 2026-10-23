@@ -46,21 +46,39 @@ Coins buy avatars and themes, seven built-in themes swapped through CSS custom p
 `students` and `guilds` reference each other: a student has `guild_name`, a guild has `leader_username`. Inserting either table first hits a foreign key that doesn't exist yet, which came up during the SQLite migration (more below). Subjects, topics, and flashcards each have a `position` column for drag-and-drop ordering. Every table only stores attributes describing its own entity, and the schema's normalised to 3NF/BCNF, done deliberately, not just how the tables happened to end up. `purchases` resolves the many-to-many between students and shop items. The `community*` tables mirror the subject/topic/flashcard structure separately, since an upload is its own copy rather than a live reference back to the original.
  
 ## Running it locally
- 
+
+With Docker (app + Postgres, seeded with the dev schema):
+
 ```bash
-git clone <repo-url>
-cd zunoot
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+docker compose up --build        # http://localhost:5000
+docker compose --profile test run --rm test   # test suite in a container
 ```
- 
-Needs a `.env` with `SECRET_KEY` and a Postgres connection string (Neon or otherwise). Nothing runs against SQLite any more.
- 
+
+Without Docker, against any local Postgres:
+
 ```bash
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+createdb zunoot && psql zunoot -f db/schema.sql -f db/seed_dev.sql
+cp .env.example .env              # then edit
 flask run
 ```
- 
+
+Tests need a local database whose name ends in `_test` (the suite resets its schema and refuses to run against anything else):
+
+```bash
+createdb zunoot_test
+TEST_DATABASE_URL=postgresql://localhost/zunoot_test pytest
+```
+
+`db/schema.sql` is reconstructed from the code for dev and tests; it is never applied to production.
+
+## Operations
+
+- `/livez` (process up) and `/healthz` (process + database), both public.
+- CI (`.github/workflows/ci.yml`) lints, runs the tests against Postgres, and boots the production image on every PR. Render deploys `main` only after CI passes.
+- Manual setup steps: [`SETUP_CHECKLIST.md`](SETUP_CHECKLIST.md). Design notes and trade-offs: [`OPS_NOTES.md`](OPS_NOTES.md).
+
 ## What got fixed in the security pass
  
 Built this for coursework first, went back to it later once people were actually using it. Found a few things.

@@ -1,0 +1,64 @@
+# Local development: the production image + a local Postgres 16.
+#
+#   docker compose up --build          # app on http://localhost:5000
+#   docker compose run --rm test       # run the test suite in a container
+#
+# The database is seeded from db/schema.sql and db/seed_dev.sql the first time
+# its volume is created. `docker compose down -v` wipes it.
+#
+# Nothing here can reach production: DATABASE_URL points at the `db` service.
+
+name: zunoot
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zunoot
+      POSTGRES_PASSWORD: zunoot
+      POSTGRES_DB: zunoot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/seed_dev.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+      - ./db/create_test_db.sql:/docker-entrypoint-initdb.d/03-test-db.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zunoot -d zunoot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      args:
+        GIT_SHA: local
+    environment:
+      DATABASE_URL: postgresql://zunoot:zunoot@db:5432/zunoot
+      SECRET_KEY: local-dev-only-not-secret
+      LOG_LEVEL: info
+    ports:
+      - "5000:10000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # One-shot test runner against the zunoot_test database in the same Postgres.
+  test:
+    profiles: ["test"]
+    image: python:3.13-slim
+    working_dir: /src
+    volumes:
+      - .:/src
+    environment:
+      TEST_DATABASE_URL: postgresql://zunoot:zunoot@db:5432/zunoot_test
+    command: >
+      sh -c "pip install -q -r requirements.txt -r requirements-dev.txt && pytest -q"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

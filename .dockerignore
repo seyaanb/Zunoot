@@ -1,0 +1,28 @@
+# Keep the build context (and the image) to what the app needs at runtime.
+.git
+.github
+.gitignore
+.dockerignore
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+flask_session/
+*.db
+*.sqlite3
+
+# Dev, test and ops tooling: not needed in the production image.
+tests/
+docs/
+ops/
+loadtest/
+scripts/backup/
+docker-compose*.yml
+Dockerfile
+*.md
+!README.md
