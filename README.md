@@ -75,9 +75,16 @@ TEST_DATABASE_URL=postgresql://localhost/zunoot_test pytest
 
 ## Operations
 
-- `/livez` (process up) and `/healthz` (process + database), both public.
-- CI (`.github/workflows/ci.yml`) lints, runs the tests against Postgres, and boots the production image on every PR. Render deploys `main` only after CI passes.
-- Manual setup steps: [`SETUP_CHECKLIST.md`](SETUP_CHECKLIST.md). Design notes and trade-offs: [`OPS_NOTES.md`](OPS_NOTES.md).
+| | |
+|---|---|
+| Health | `/livez` (process up, Render's health check), `/healthz` (process + database) |
+| CI/CD | `.github/workflows/ci.yml`: lint, tests against Postgres, alert-rule tests, backup round trip, production-image boot, k6 smoke. Render deploys `main` only after CI passes. |
+| Observability | Prometheus metrics on `/metrics` (token), JSON logs with request IDs, Grafana dashboard in `ops/grafana/` |
+| SLOs and alerts | [`docs/SLO.md`](docs/SLO.md), rules in `ops/prometheus/rules/`, [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
+| Backups | nightly, encrypted, restore-tested: [`docs/RESTORE_DRILL.md`](docs/RESTORE_DRILL.md) |
+| Load testing | [`loadtest/README.md`](loadtest/README.md), results in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) |
+| Setup steps | [`SETUP_CHECKLIST.md`](SETUP_CHECKLIST.md) |
+| Design notes | [`OPS_NOTES.md`](OPS_NOTES.md), with trade-offs and the questions they answer |
 
 ## What got fixed in the security pass
  

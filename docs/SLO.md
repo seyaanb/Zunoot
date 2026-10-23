@@ -133,6 +133,18 @@ Monitoring that costs more than the service is bad engineering. On free tiers it
   Starter plan (~$7/month), which removes both the spin-down and the hour cap. That's a decision for
   the owner; see SETUP_CHECKLIST.md.
 
+## Measurement limits
+
+- **Grafana Cloud Free keeps metrics for 14 days.** The `…ratio_rate30d` recording rules and the
+  dashboard's "30-day" panels can therefore only see the most recent 14 days. Because the SLIs are
+  *ratios*, a 14-day ratio is a fair estimate of the 30-day one, but it is still an estimate, and the
+  budget-remaining figure assumes the unseen days looked like the seen ones. On a paid plan, the same rules
+  compute a true 30-day window with no changes.
+- **Long-range uptime comes from the uptime monitor**, which keeps 3 months of history on its free plan.
+  The monthly uptime figure quoted anywhere (e.g. a CV) should come from there, not from Grafana.
+- **Server-side latency excludes the network to the user** and Render's proxy. It measures what the app
+  controls. Real users on slow mobile connections see more.
+
 ## Error budget policy
 
 Light, because it's a one-person project. It is still written down, because writing it down is the point.
