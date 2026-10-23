@@ -278,10 +278,22 @@ jobs:
         run: |
           k6 run -q -e BASE_URL=http://localhost:10000 -e PROFILE=smoke \
             -e LOADTEST_USERS=1 -e SUBJECTS=1 -e TOPICS=2 -e CARDS=3 -e RUN_ID=ci \
-            -e SUMMARY_FILE=k6-smoke.json loadtest/zunoot.js
+            -e SUMMARY_FILE=k6-smoke.json loadtest/zunoot.js 2>&1 | tee k6.out
+          exit "${PIPESTATUS[0]}"
       - name: Container logs
         if: always()
         run: docker logs app || true
+      # Attach the evidence to the job as annotations (readable in the PR's
+      # checks view and through the API), so a failure can be diagnosed
+      # without the raw log.
+      - name: Annotate failure details
+        if: failure()
+        run: |
+          enc() { sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}'; }
+          echo "::error title=container log (last 40 lines)::$(docker logs app 2>&1 | tail -n 40 | enc)"
+          if [ -f k6.out ]; then
+            echo "::error title=k6 output (last 40 lines)::$(tail -n 40 k6.out | enc)"
+          fi
       - name: Report image size
         run: |
           docker image inspect zunoot:ci --format '{{.Size}}' | awk '{printf "image size: %.0f MB\n", $1/1000/1000}'
