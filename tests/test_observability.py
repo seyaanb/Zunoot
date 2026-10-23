@@ -71,11 +71,12 @@ def test_latency_histogram_and_db_counts_recorded(logged_in):
     labels = dict(method="GET", route="/library/")
     count_before = sample("zunoot_http_request_duration_seconds_count", **labels)
     queries_before = sample("zunoot_db_queries_per_request_sum", route="/library/")
-    connects_before = sample("zunoot_db_connections_per_request_sum", route="/library/")
+    connects_before = sample("zunoot_db_connections_per_request_count", route="/library/")
     logged_in.get("/library/")
     assert sample("zunoot_http_request_duration_seconds_count", **labels) == count_before + 1
     assert sample("zunoot_db_queries_per_request_sum", route="/library/") > queries_before
-    assert sample("zunoot_db_connections_per_request_sum", route="/library/") > connects_before
+    # recorded once per request (with the connection pool, usually as 0 new connections)
+    assert sample("zunoot_db_connections_per_request_count", route="/library/") == connects_before + 1
 
 
 def test_db_query_timing_is_labelled_by_query_function(logged_in):
