@@ -92,8 +92,12 @@ stage copies only that venv and the app. Runs as UID 10001, app files owned by r
 - **tini:** the process that receives SIGTERM must forward it and reap zombies. Without an init, PID 1
   gets kernel-default signal handling, so on deploy the container could be killed mid-request instead of
   draining. gunicorn's `graceful_timeout = 25` then lets in-flight requests finish.
-- **No `preload_app`:** `app.py` opens a DB connection at import. Forking after that would share one
-  socket between processes and corrupt the protocol stream.
+- **Preload is off in `gunicorn.conf.py`, but the app must survive it anyway.** Render's native Python
+  runtime sets `GUNICORN_CMD_ARGS="--preload …"`, which overrides the config file. Under preload, the
+  master imports the app, opening a pooled DB connection, before forking. Two workers sharing that one
+  socket would corrupt the protocol stream. So a `post_fork` hook disposes the inherited pool in each
+  worker, and the Prometheus multi-process directory is created before any metric is defined. Not knowing
+  about that default crashed the first deploy: see `docs/incidents/2026-10-23-render-preload-boot-crash.md`.
 
 **Trade-offs:** base images pinned by tag, not digest (simpler, but not bit-for-bit reproducible;
 Dependabot with digest pinning is the next step). apt packages not version-pinned (Debian drops old
@@ -103,6 +107,13 @@ versions, so pins break rebuilds); justified in `.hadolint.yaml`.
 - *How does a deploy avoid dropping requests?* Render starts the new container, waits until `/livez` passes,
   switches traffic, then sends SIGTERM to the old one. tini forwards it to gunicorn, which stops accepting
   new connections and finishes in-flight ones within `graceful_timeout`.
+- *Tell me about a deploy that went wrong.* The first deploy of this work crashed on boot. Render's
+  Python runtime adds `--preload` through a default environment variable, so the app was imported before
+  the hook that created the metrics directory. CI had tested the Docker image, and I'd checked the start
+  command locally, but nothing had tested the platform's actual *environment*. Fixes: make the code
+  independent of start-up order, dispose the inherited DB pool after fork (a second bug the same setting
+  exposed), and add a CI job that reproduces Render's runtime exactly. Lesson: the deploy target is part
+  of the system under test. Write-up: `docs/incidents/2026-10-23-render-preload-boot-crash.md`.
 - *Why gthread workers, and why 2 × 4?* The app is I/O-bound (waiting on Neon), so threads give cheap
   concurrency within a process. Two processes isolate a crash or a stuck request and use a second core if
   the plan has one. 512 MB fits two Flask processes comfortably. They're env vars, so they can be tuned

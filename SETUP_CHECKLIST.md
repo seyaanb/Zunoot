@@ -52,7 +52,9 @@ you ever need to go back.
   ```bash
   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
   ```
-- [ ] **2.2 Add environment variables.** Render → **zunoot** → **Environment** → **Add Environment Variable**:
+- [ ] **2.2 Add environment variables.** (Leave Render's own default `GUNICORN_CMD_ARGS` alone. It adds
+  `--preload`, which the app supports, and CI's `render-native` job tests exactly that setup.) Render →
+  **zunoot** → **Environment** → **Add Environment Variable**:
   - `METRICS_TOKEN` = the token from 2.1
   - `WEB_CONCURRENCY` = `2`
   - `GUNICORN_THREADS` = `4`
