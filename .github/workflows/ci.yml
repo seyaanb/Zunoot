@@ -48,7 +48,7 @@ jobs:
       - name: ruff (strict, infrastructure code)
         run: >
           ruff check --output-format=github --select E,F,W,B
-          blueprints/ops tests gunicorn.conf.py observability ops
+          blueprints/ops tests gunicorn.conf.py observability ops loadtest
 
   lint-infra:
     runs-on: ubuntu-latest
@@ -205,6 +205,16 @@ jobs:
           done
           curl -fsS http://localhost:10000/healthz | tee /dev/stderr | grep -q '"status":"ok"'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:10000/auth/)" = "200"
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: "2.3.0"
+      # End-to-end user flow against the production image: register, build a
+      # small library, review cards, end the session, delete the account.
+      - name: k6 smoke test (main user flow)
+        run: |
+          k6 run -q -e BASE_URL=http://localhost:10000 -e PROFILE=smoke \
+            -e LOADTEST_USERS=1 -e SUBJECTS=1 -e TOPICS=2 -e CARDS=3 -e RUN_ID=ci \
+            -e SUMMARY_FILE=k6-smoke.json loadtest/zunoot.js
       - name: Container logs
         if: always()
         run: docker logs app || true

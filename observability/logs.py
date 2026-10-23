@@ -66,8 +66,16 @@ def configure(level=None):
     handler.addFilter(HandledErrorCounter())
     handler.set_name("zunoot-json")
 
+    # Replace any console handler already on the root logger: under gunicorn,
+    # its logconfig_dict installs one, and keeping both would print every line
+    # twice. Handlers writing elsewhere (e.g. pytest's capture) are left alone.
     root = logging.getLogger()
-    root.handlers = [h for h in root.handlers if h.get_name() != "zunoot-json"]
+    consoles = (sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__)
+    root.handlers = [
+        h for h in root.handlers
+        if h.get_name() != "zunoot-json"
+        and not (type(h) is logging.StreamHandler and getattr(h, "stream", None) in consoles)
+    ]
     root.addHandler(handler)
     root.setLevel(level)
 

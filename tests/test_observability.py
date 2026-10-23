@@ -180,3 +180,22 @@ def test_json_formatter_includes_request_id_and_traceback():
 def test_lines_outside_a_request_have_placeholder_id():
     record = logging.getLogger("x").makeRecord("x", logging.INFO, __file__, 1, "startup", None, None)
     assert json.loads(JsonFormatter().format(record))["request_id"] == "-"
+
+
+def test_configure_leaves_exactly_one_console_handler():
+    """Under gunicorn the root logger already has a stdout handler (logconfig_dict);
+    configure() must replace it, not add a second one (every line printed twice)."""
+    import sys
+    from observability import logs
+    root = logging.getLogger()
+    pre_existing = logging.StreamHandler(sys.stdout)
+    root.addHandler(pre_existing)
+    try:
+        logs.configure()
+        logs.configure()  # idempotent
+        consoles = [h for h in root.handlers
+                    if isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout]
+        assert len(consoles) == 1 and consoles[0].get_name() == "zunoot-json"
+    finally:
+        if pre_existing in root.handlers:
+            root.removeHandler(pre_existing)
