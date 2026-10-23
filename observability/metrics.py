@@ -18,10 +18,16 @@ whichever worker happened to answer.
 
 import os
 
-from prometheus_client import (
+from .multiproc import ensure_dir
+
+# Must run before the first metric below is defined: in multi-process mode,
+# defining a Gauge opens a file in PROMETHEUS_MULTIPROC_DIR straight away.
+ensure_dir()
+
+from prometheus_client import (  # noqa: E402
     CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Gauge, Histogram, generate_latest,
 )
-from prometheus_client import multiprocess
+from prometheus_client import multiprocess  # noqa: E402
 
 # Buckets include the SLO thresholds (0.5 s internal target, 1 s SLO) so
 # "fraction of requests under the threshold" is exact rather than interpolated.
